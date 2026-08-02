@@ -8,6 +8,8 @@ export interface Agent {
   status: string;
   title: string | null;
   worktree: string | null;
+  /** Seconds the agent process has been alive, or null if unknown. */
+  uptimeSec: number | null;
 }
 
 export interface Commit {
@@ -46,6 +48,19 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return (await $`git -C ${cwd} ${args}`.quiet().text()).trim();
 }
 
+/** Age of the pane's foreground process (the agent itself), in seconds. */
+async function agentUptime(paneId: string): Promise<number | null> {
+  try {
+    const info = await herdrJson(["pane", "process-info", "--pane", paneId]);
+    const pid = info.process_info?.foreground_processes?.[0]?.pid;
+    if (!pid) return null;
+    const et = (await $`ps -o etimes= -p ${pid}`.quiet().text()).trim();
+    return et ? Number(et) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The workspace's repo root: any pane cwd -> its main checkout. */
 async function findRepoRoot(paneCwds: string[]): Promise<string | null> {
   for (const cwd of paneCwds) {
@@ -73,14 +88,17 @@ export async function collect(workspaceId: string): Promise<Snapshot> {
   );
   if (!repoRoot) throw new Error("no git repo behind this workspace's panes");
 
-  const agents: Agent[] = (await herdrJson(["agent", "list"])).agents
-    .filter((a: any) => a.workspace_id === workspaceId)
-    .map((a: any) => ({
-      paneId: a.pane_id,
-      status: a.agent_status,
-      title: a.terminal_title_stripped ?? null,
-      worktree: a.tokens?.worktree ?? null,
-    }));
+  const agents: Agent[] = await Promise.all(
+    (await herdrJson(["agent", "list"])).agents
+      .filter((a: any) => a.workspace_id === workspaceId)
+      .map(async (a: any) => ({
+        paneId: a.pane_id,
+        status: a.agent_status,
+        title: a.terminal_title_stripped ?? null,
+        worktree: a.tokens?.worktree ?? null,
+        uptimeSec: await agentUptime(a.pane_id),
+      })),
+  );
 
   let defaultBranch: string | null = null;
   try {
