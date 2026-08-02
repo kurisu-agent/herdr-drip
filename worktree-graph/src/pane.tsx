@@ -143,7 +143,8 @@ function App() {
   });
   rows.push(blank("b0"));
 
-  for (const wt of snapshot.worktrees) {
+  for (const [wi, wt] of snapshot.worktrees.entries()) {
+    if (wi > 0) rows.push(blank(`sep-${wt.path}`));
     const open = !collapsed.has(wt.path);
     const lead = wt.agents[0]
       ? STATUS[wt.agents[0].status] ?? STATUS.unknown
