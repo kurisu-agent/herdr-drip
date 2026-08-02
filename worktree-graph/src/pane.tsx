@@ -160,10 +160,7 @@ function App() {
       render: (h) => (
         <Text wrap="truncate-end" inverse={h}>
           <Text color={lead.color}>{lead.icon}</Text>
-          <Text bold> {wt.name}</Text>
-          {wt.branch && wt.branch !== wt.name && (
-            <Text color="cyan"> {wt.branch}</Text>
-          )}
+          <Text bold> {wt.branch ?? wt.name}</Text>
           {wt.ahead > 0 && <Text color="green"> +{wt.ahead}</Text>}
           {wt.behind > 0 && <Text color="red"> -{wt.behind}</Text>}
           {wt.dirty > 0 && <Text color="yellow"> ±{wt.dirty}</Text>}
