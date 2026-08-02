@@ -1,0 +1,21 @@
+id = "drip.worktree-tokens"
+name = "Worktree tokens"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Report each agent pane's git worktree name as a $worktree sidebar token"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["bin/watch"]
+
+[[actions]]
+id = "sync"
+title = "Report worktree tokens now"
+contexts = ["workspace"]
+command = ["bin/sync"]
+
+[[actions]]
+id = "watch"
+title = "Start worktree token watcher"
+contexts = ["workspace"]
+command = ["bin/watch"]

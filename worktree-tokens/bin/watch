@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Startup hook: refresh worktree tokens well inside their 30s TTL.
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+while :; do
+  "$here/sync" || true
+  sleep 5
+done
