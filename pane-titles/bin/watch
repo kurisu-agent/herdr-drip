@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Startup hook: keep agent pane labels following their terminal titles.
+# Spawned by herdr's [[startup]] runner; lives as long as the server does.
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+while :; do
+  "$here/sync" || true
+  sleep 2
+done

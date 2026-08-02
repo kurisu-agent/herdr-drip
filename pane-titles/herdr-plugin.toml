@@ -1,0 +1,21 @@
+id = "drip.pane-titles"
+name = "Pane titles"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Mirror each agent pane's terminal title onto its pane border label"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["bin/watch"]
+
+[[actions]]
+id = "sync"
+title = "Sync pane titles now"
+contexts = ["workspace"]
+command = ["bin/sync"]
+
+[[actions]]
+id = "watch"
+title = "Start pane title watcher"
+contexts = ["workspace"]
+command = ["bin/watch"]
