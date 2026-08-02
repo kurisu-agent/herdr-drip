@@ -1,0 +1,12 @@
+id = "drip.hello"
+name = "Hello"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Template plugin for herdr-drip — copy this directory to start a new one"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "greet"
+title = "Say hello"
+contexts = ["workspace"]
+command = ["bin/greet"]

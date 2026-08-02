@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Minimal action: prove the plugin env is wired and the herdr CLI is reachable.
+set -euo pipefail
+
+echo "hello from ${HERDR_PLUGIN_ID:-<not under herdr>}"
+echo "root:   ${HERDR_PLUGIN_ROOT:-?}"
+echo "config: ${HERDR_PLUGIN_CONFIG_DIR:-?}"
+echo "state:  ${HERDR_PLUGIN_STATE_DIR:-?}"
+
+if [[ -n "${HERDR_BIN_PATH:-}" ]]; then
+  "$HERDR_BIN_PATH" workspace list
+fi
