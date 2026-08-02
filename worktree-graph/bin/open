@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Action: open the worktree graph split right of the invoking pane.
+set -euo pipefail
+herdr=${HERDR_BIN_PATH:-herdr}
+exec "$herdr" plugin pane open \
+  --plugin drip.worktree-graph \
+  --entrypoint graph \
+  --placement split \
+  --direction right \
+  ${HERDR_PANE_ID:+--target-pane "$HERDR_PANE_ID"} \
+  --focus

@@ -1,0 +1,21 @@
+id = "drip.worktree-graph"
+name = "Worktree graph"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Ink pane visualizing a workspace's worktrees, agents, and git graph"
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["bun", "install"]
+
+[[panes]]
+id = "graph"
+title = "Worktree graph"
+placement = "split"
+command = ["bun", "run", "src/pane.tsx"]
+
+[[actions]]
+id = "open"
+title = "Open worktree graph"
+contexts = ["workspace"]
+command = ["bin/open"]
