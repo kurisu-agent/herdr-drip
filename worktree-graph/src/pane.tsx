@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import { render, Box, Text, Spacer, useInput, useApp, useStdout } from "ink";
-import { $ } from "bun";
 import { collect, type Snapshot, type Agent } from "./data.ts";
 
 const REFRESH_MS = 2000;
@@ -149,6 +148,7 @@ function App() {
     const lead = wt.agents[0]
       ? STATUS[wt.agents[0].status] ?? STATUS.unknown
       : { icon: "○", color: "gray" };
+    const totalSec = wt.agents.reduce((n, a) => n + (a.uptimeSec ?? 0), 0);
     rows.push({
       key: wt.path,
       onClick: () =>
@@ -164,6 +164,7 @@ function App() {
           {wt.ahead > 0 && <Text color="green"> +{wt.ahead}</Text>}
           {wt.behind > 0 && <Text color="red"> -{wt.behind}</Text>}
           {wt.dirty > 0 && <Text color="yellow"> ±{wt.dirty}</Text>}
+          {totalSec > 0 && <Text dimColor> · {fmt(totalSec)}</Text>}
           {!open && <Text dimColor> …</Text>}
         </Text>
       ),
@@ -174,7 +175,12 @@ function App() {
       const inStatus = clock.current.inStatusSec(a.paneId);
       rows.push({
         key: a.paneId,
-        onClick: () => void $`${herdr} agent focus ${a.paneId}`.quiet().nothrow(),
+        // Bun.spawn is eager; a Bun $ promise never runs unless awaited.
+        onClick: () =>
+          Bun.spawn([herdr, "agent", "focus", a.paneId], {
+            stdout: "ignore",
+            stderr: "ignore",
+          }),
         render: (h) => (
           <Text wrap="truncate-end" inverse={h}>
             <Text dimColor>│ </Text>
