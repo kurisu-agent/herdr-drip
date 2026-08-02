@@ -10,6 +10,34 @@ mkdir -p "$state_dir"
 state="$state_dir/labels.json"
 [[ -s $state ]] || echo '{}' > "$state"
 
+# Worktree of a pane, or empty. Two detectors, because Claude's worktree
+# skill does NOT chdir the TUI process — only its tools run in the worktree:
+#   1. pane process cwd inside a linked worktree (agents launched there)
+#   2. the repo's actual linked-worktree names, matched against the bottom
+#      of the visible screen (the statusline shows the worktree path, but
+#      its separators are nerd-font glyphs — match names, not formats)
+detect_worktree() {
+  local id=$1 cwd=$2 gitdir common top tail_text name
+  [[ -n $cwd && -d $cwd ]] || return 0
+  gitdir=$(git -C "$cwd" rev-parse --git-dir 2>/dev/null) || return 0
+  common=$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null) || return 0
+  top=$(git -C "$cwd" rev-parse --show-toplevel)
+  if [[ $gitdir != "$common" ]]; then
+    basename "$top"
+    return
+  fi
+  tail_text=$("$herdr" pane read "$id" --source visible 2>/dev/null | tail -n 4)
+  while IFS= read -r path; do
+    [[ -z $path ]] && continue
+    name=$(basename "$path")
+    if [[ $tail_text == *"$name"* ]]; then
+      echo "$name"
+      return
+    fi
+  done < <(git -C "$cwd" worktree list --porcelain 2>/dev/null |
+    awk -v top="$top" '$1 == "worktree" && $2 != top { print $2 }')
+}
+
 "$herdr" pane list | jq -c '.result.panes[] | select(.agent != null)' |
 while IFS= read -r pane; do
   id=$(jq -r .pane_id <<<"$pane")
@@ -18,13 +46,8 @@ while IFS= read -r pane; do
   [[ -z $title ]] && continue
   # Prefix with the linked worktree name when the pane runs inside one.
   cwd=$(jq -r '.foreground_cwd // .cwd // empty' <<<"$pane")
-  if [[ -n $cwd && -d $cwd ]]; then
-    gitdir=$(git -C "$cwd" rev-parse --git-dir 2>/dev/null) || gitdir=""
-    common=$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null) || common=""
-    if [[ -n $gitdir && $gitdir != "$common" ]]; then
-      title="$(basename "$(git -C "$cwd" rev-parse --show-toplevel)") · $title"
-    fi
-  fi
+  wt=$(detect_worktree "$id" "$cwd")
+  [[ -n $wt ]] && title="$wt · $title"
   [[ $title == "$label" ]] && continue
   ours=$(jq -r --arg id "$id" '.[$id] // empty' "$state")
   [[ -n $label && $label != "$ours" ]] && continue
