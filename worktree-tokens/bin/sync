@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# One pass: report each agent pane's git worktree name (basename of the
-# repo/worktree toplevel; plain cwd basename outside git) as a `worktree`
-# token, for `$worktree` rows in [ui.sidebar.agents]. TTL'd so tokens for
-# closed panes fade out on their own.
+# One pass: report each agent pane's LINKED git worktree name (basename of
+# the worktree toplevel) as a `worktree` token, for `$worktree` rows in
+# [ui.sidebar.agents]. Main checkouts report nothing, so worktree rows only
+# appear for panes actually inside a worktree; TTL'd so tokens for closed
+# panes fade out on their own.
 set -euo pipefail
 
 herdr=${HERDR_BIN_PATH:-herdr}
@@ -13,7 +14,10 @@ while IFS= read -r pane; do
   id=$(jq -r .pane_id <<<"$pane")
   cwd=$(jq -r '.foreground_cwd // .cwd // empty' <<<"$pane")
   [[ -z $cwd || ! -d $cwd ]] && continue
-  top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || top=$cwd
+  gitdir=$(git -C "$cwd" rev-parse --git-dir 2>/dev/null) || continue
+  common=$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null) || continue
+  [[ $gitdir == "$common" ]] && continue # main checkout, not a linked worktree
+  top=$(git -C "$cwd" rev-parse --show-toplevel)
   "$herdr" pane report-metadata "$id" --source drip.worktree-tokens \
     --token "worktree=$(basename "$top")" --seq "$seq" --ttl-ms 30000 \
     >/dev/null

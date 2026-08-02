@@ -15,7 +15,17 @@ while IFS= read -r pane; do
   id=$(jq -r .pane_id <<<"$pane")
   title=$(jq -r '.terminal_title_stripped // empty' <<<"$pane")
   label=$(jq -r '.label // empty' <<<"$pane")
-  [[ -z $title || $title == "$label" ]] && continue
+  [[ -z $title ]] && continue
+  # Prefix with the linked worktree name when the pane runs inside one.
+  cwd=$(jq -r '.foreground_cwd // .cwd // empty' <<<"$pane")
+  if [[ -n $cwd && -d $cwd ]]; then
+    gitdir=$(git -C "$cwd" rev-parse --git-dir 2>/dev/null) || gitdir=""
+    common=$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null) || common=""
+    if [[ -n $gitdir && $gitdir != "$common" ]]; then
+      title="$(basename "$(git -C "$cwd" rev-parse --show-toplevel)") · $title"
+    fi
+  fi
+  [[ $title == "$label" ]] && continue
   ours=$(jq -r --arg id "$id" '.[$id] // empty' "$state")
   [[ -n $label && $label != "$ours" ]] && continue
   "$herdr" pane rename "$id" "$title" >/dev/null
