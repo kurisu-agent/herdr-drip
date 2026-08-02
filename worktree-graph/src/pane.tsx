@@ -183,7 +183,7 @@ function App() {
             <Text dimColor>│ </Text>
             <Text color={s.color}>{a.status}</Text>
             <Text color={s.color} dimColor> {fmt(inStatus)}</Text>
-            {a.uptimeSec != null && <Text dimColor> · Σ{fmt(a.uptimeSec)}</Text>}
+            {a.uptimeSec != null && <Text dimColor> · up {fmt(a.uptimeSec)}</Text>}
             <Text> {a.title ?? ""}</Text>
             {h && <Text dimColor> ↵ focus</Text>}
           </Text>
