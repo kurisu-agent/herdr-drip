@@ -1,0 +1,30 @@
+id = "drip.smart-focus"
+name = "Smart focus"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Edge-aware pane focus: at the workspace edge, roll into the previous/next space"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "left"
+title = "Focus left, or previous space at the edge"
+contexts = ["workspace"]
+command = ["bin/focus", "left"]
+
+[[actions]]
+id = "right"
+title = "Focus right, or next space at the edge"
+contexts = ["workspace"]
+command = ["bin/focus", "right"]
+
+[[actions]]
+id = "up"
+title = "Focus up, or previous space at the edge"
+contexts = ["workspace"]
+command = ["bin/focus", "up"]
+
+[[actions]]
+id = "down"
+title = "Focus down, or next space at the edge"
+contexts = ["workspace"]
+command = ["bin/focus", "down"]

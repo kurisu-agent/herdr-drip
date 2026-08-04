@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Edge-aware focus. Move to the neighboring pane when one exists; at the
+# workspace edge, left/up rolls to the previous space and right/down to the
+# next (wrapping), zellij-style.
+set -euo pipefail
+
+herdr=${HERDR_BIN_PATH:-herdr}
+dir=$1
+
+neighbor=$("$herdr" pane neighbor --current --direction "$dir" |
+  jq -r '.result.neighbor.neighbor_pane_id // empty')
+if [[ -n $neighbor ]]; then
+  exec "$herdr" pane focus --current --direction "$dir"
+fi
+
+list=$("$herdr" workspace list)
+mapfile -t ws < <(jq -r '.result.workspaces | sort_by(.number) | .[].workspace_id' <<<"$list")
+cur=$(jq -r '.result.workspaces[] | select(.focused).workspace_id' <<<"$list")
+n=${#ws[@]}
+(( n > 1 )) || exit 0
+
+for i in "${!ws[@]}"; do
+  [[ ${ws[$i]} == "$cur" ]] || continue
+  case $dir in
+    left | up) target=${ws[$(((i - 1 + n) % n))]} ;;
+    *) target=${ws[$(((i + 1) % n))]} ;;
+  esac
+  exec "$herdr" workspace focus "$target"
+done
