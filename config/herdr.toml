@@ -1,0 +1,35 @@
+onboarding = false
+[ui.sound]
+enabled = false
+
+[ui.toast]
+delivery = "herdr"
+
+[ui]
+show_agent_labels_on_pane_borders = true
+
+agent_panel_sort = "priority"
+[theme]
+name = "catppuccin"
+auto_switch = false
+
+[ui.sidebar.agents.rows_by_agent]
+claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"], ["$worktree"]]
+
+[keys]
+# Layering: Ctrl+p <letter> = outer zellij, Ctrl+b <letter> = herdr.
+split_vertical = "prefix+r"   # Ctrl+b r — pane to the right
+split_horizontal = "prefix+d" # Ctrl+b d — pane below
+resize_mode = ""              # frees prefix+r; resizing is done by mouse
+# close_pane stays on the default prefix+x (Ctrl+b x)
+
+# Pane navigation: zellij owns plain Alt+arrows, so shift the inner layer.
+focus_pane_left = "alt+shift+left"
+focus_pane_down = "alt+shift+down"
+focus_pane_up = "alt+shift+up"
+focus_pane_right = "alt+shift+right"
+
+[experimental]
+kitty_graphics = true
+pane_history = true
+switch_ascii_input_source_in_prefix = false

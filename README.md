@@ -38,6 +38,20 @@ herdr plugin action invoke drip.hello.greet
 herdr plugin log list --plugin drip.hello
 ```
 
+## Config
+
+`config/herdr.toml` is the drip's curated herdr config — keybindings layered
+under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Alt+Shift+arrows` for pane
+focus), sidebar rows wired to the plugins' `$worktree` token, and the
+experimental kitty-graphics switch. Adopt it with:
+
+```
+./scripts/apply-config.sh
+```
+
+which backs up any existing config and symlinks `~/.config/herdr/config.toml`
+into the repo, so future config edits are tracked here.
+
 ## Adding a plugin
 
 Copy `hello/` to a new top-level directory and edit:
