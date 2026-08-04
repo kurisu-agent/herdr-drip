@@ -23,20 +23,12 @@ split_horizontal = "prefix+d" # Ctrl+b d — pane below
 resize_mode = ""              # frees prefix+r; resizing is done by mouse
 # close_pane stays on the default prefix+x (Ctrl+b x)
 
-# Pane navigation: Alt+Shift+arrows via drip.smart-focus — moves between
-# panes, and rolls into the previous/next space at the workspace edge.
-# The built-in focus bindings stay unset so the chords are free.
+# Pane navigation: Alt+Shift+arrows. Left/right move panes only; up/down
+# go through drip.smart-focus, which rolls into the previous/next space
+# when pushing against the top/bottom edge.
+focus_pane_left = "alt+shift+left"
+focus_pane_right = "alt+shift+right"
 switch_workspace = "prefix+shift+1..9"
-
-[[keys.command]]
-key = "alt+shift+left"
-command = "~/Code/herdr-drip/smart-focus/bin/focus left"
-description = "focus left / previous space"
-
-[[keys.command]]
-key = "alt+shift+down"
-command = "~/Code/herdr-drip/smart-focus/bin/focus down"
-description = "focus down / next space"
 
 [[keys.command]]
 key = "alt+shift+up"
@@ -44,9 +36,9 @@ command = "~/Code/herdr-drip/smart-focus/bin/focus up"
 description = "focus up / previous space"
 
 [[keys.command]]
-key = "alt+shift+right"
-command = "~/Code/herdr-drip/smart-focus/bin/focus right"
-description = "focus right / next space"
+key = "alt+shift+down"
+command = "~/Code/herdr-drip/smart-focus/bin/focus down"
+description = "focus down / next space"
 
 [experimental]
 kitty_graphics = true
