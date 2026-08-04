@@ -29,6 +29,12 @@ focus_pane_down = "alt+shift+down"
 focus_pane_up = "alt+shift+up"
 focus_pane_right = "alt+shift+right"
 
+# Spaces: arrows move panes, h/l letters cycle spaces (zellij owns plain
+# alt+h/l), numbers jump straight there. The picker stays on Ctrl+b w.
+previous_workspace = "alt+shift+h"
+next_workspace = "alt+shift+l"
+switch_workspace = "prefix+shift+1..9"
+
 [experimental]
 kitty_graphics = true
 pane_history = true
