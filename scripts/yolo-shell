@@ -1,0 +1,6 @@
+#!/bin/sh
+# herdr's default_shell: every new interactive pane starts claude in yolo
+# mode (the `yolo` zsh alias, inlined — aliases don't resolve here), and
+# exiting claude lands in a normal shell instead of closing the pane.
+claude --dangerously-skip-permissions
+exec zsh -i

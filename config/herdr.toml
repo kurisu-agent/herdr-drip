@@ -16,6 +16,10 @@ auto_switch = false
 [ui.sidebar.agents.rows_by_agent]
 claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"], ["$worktree"]]
 
+[terminal]
+# New panes boot straight into a yolo claude; exit drops to zsh.
+default_shell = "/home/dev/Code/herdr-drip/scripts/yolo-shell"
+
 [keys]
 # Layering: Ctrl+p <letter> = outer zellij, Ctrl+b <letter> = herdr.
 split_vertical = "prefix+r"   # Ctrl+b r — pane to the right
