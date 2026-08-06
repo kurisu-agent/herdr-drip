@@ -52,6 +52,16 @@ experimental kitty-graphics switch. Adopt it with:
 which backs up any existing config and symlinks `~/.config/herdr/config.toml`
 into the repo, so future config edits are tracked here.
 
+The config is path-free: keybindings reach the plugins through
+`herdr plugin action invoke`, and `default_shell` is a PATH-resolved
+`yolo-shell`. `apply-config.sh` links `scripts/yolo-shell` into
+`~/.local/bin` unless something already provides it — nix users can take it
+from the flake instead:
+
+```
+nix profile add github:kurisu-agent/herdr-drip#yolo-shell
+```
+
 ## Adding a plugin
 
 Copy `hello/` to a new top-level directory and edit:

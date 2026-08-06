@@ -17,8 +17,12 @@ auto_switch = false
 claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"], ["$worktree"]]
 
 [terminal]
-# New panes boot straight into a yolo claude; exit drops to zsh.
-default_shell = "/home/dev/Code/herdr-drip/scripts/yolo-shell"
+# New panes boot straight into a yolo claude; exit drops to zsh. The name is
+# resolved against the herdr SERVER's PATH (no ~ expansion), so it must live
+# somewhere the server sees: `nix profile add .#yolo-shell` covers nix
+# boxes; apply-config.sh also links it into ~/.local/bin for shells that
+# launch herdr with a normal user PATH.
+default_shell = "yolo-shell"
 
 [keys]
 # Layering: Ctrl+p <letter> = outer zellij, Ctrl+b <letter> = herdr.
@@ -36,12 +40,12 @@ switch_workspace = "prefix+shift+1..9"
 
 [[keys.command]]
 key = "alt+shift+up"
-command = "~/Code/herdr-drip/smart-focus/bin/focus up"
+command = "herdr plugin action invoke up --plugin drip.smart-focus"
 description = "focus up / previous space"
 
 [[keys.command]]
 key = "alt+shift+down"
-command = "~/Code/herdr-drip/smart-focus/bin/focus down"
+command = "herdr plugin action invoke down --plugin drip.smart-focus"
 description = "focus down / next space"
 
 [experimental]
