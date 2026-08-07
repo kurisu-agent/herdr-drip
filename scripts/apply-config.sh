@@ -39,7 +39,9 @@ if [[ -n $server_pid && -r /proc/$server_pid/environ ]]; then
   if ((${#missing[@]})); then
     echo "WARNING: not on the herdr server's PATH: ${missing[*]}" >&2
     echo "  yolo-shell missing means new panes fail to spawn; bun/python3 break" >&2
-    echo "  worktree-graph and the claude agent-state hook. Fix with" >&2
+    echo "  worktree-graph and agent-state hooks (hosts using the drip's NixOS" >&2
+    echo "  module get python3 injected for the claude hook and can ignore that" >&2
+    echo "  one). Fix with" >&2
     echo "    nix profile add github:kurisu-agent/herdr-drip#herdr-drip-deps" >&2
     echo "  or restart the herdr server from a shell whose PATH provides them." >&2
   fi

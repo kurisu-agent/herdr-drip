@@ -16,9 +16,11 @@
 #     services.claude-code.settings, so both of nix-claude-drip's delivery
 #     paths carry it (its mkSettings recursiveUpdate merges nested attrs,
 #     and `hooks` is not module-owned there, so nothing fights it);
-#   - guarantees python3 in the system environment — the hook script
+#   - injects python3 into the hook command's PATH — the hook script
 #     (integration v7) guards `command -v python3 || exit 0` and is
-#     completely inert without it, while still reporting healthy;
+#     completely inert without it, while still reporting healthy. The
+#     store path is scoped to that one invocation; nothing lands on
+#     interactive PATHs or in the system profile;
 #   - re-runs `herdr integration install claude` (per user) whenever herdr
 #     reports the hook script missing or outdated, so the script side
 #     tracks herdr's integration version instead of pinning a vendored
@@ -43,14 +45,17 @@ let
   # user — hook commands run through a shell, so $HOME does the per-user
   # part. The [ -x ] guard keeps the entry inert for a user who has never
   # had the integration installed; a dangling command would error on every
-  # SessionStart.
+  # SessionStart. The PATH prefix satisfies the script's
+  # `command -v python3` guard without a system-wide python3 — the store
+  # path is referenced by the generated settings.json, so it stays rooted
+  # with the system closure.
   hookScript = "$HOME/.claude/hooks/herdr-agent-state.sh";
   hookEntry = {
     matcher = "*";
     hooks = [
       {
         type = "command";
-        command = "[ -x \"${hookScript}\" ] || exit 0; exec bash \"${hookScript}\" session";
+        command = "[ -x \"${hookScript}\" ] || exit 0; PATH=${pkgs.python3}/bin:$PATH exec bash \"${hookScript}\" session";
         timeout = 10;
       }
     ];
@@ -149,9 +154,6 @@ in
     ];
 
     services.claude-code.settings.hooks.SessionStart = [ hookEntry ];
-
-    # The hook script no-ops (exit 0, no log) without python3 on PATH.
-    environment.systemPackages = [ pkgs.python3 ];
 
     # After claudeDripSettings so the post-install cleanup in
     # ensureIntegration sees the declared settings.json, not the

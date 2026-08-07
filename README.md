@@ -98,11 +98,12 @@ services.herdr-drip.claudeAgentState.enable = true;
 ```
 
 The module declares the hooks entry through `services.claude-code.settings`
-(so the overwrite carries it instead of destroying it), puts `python3` in
-the system environment, and re-runs `herdr integration install claude` on
-activation whenever herdr reports the hook script missing or outdated — so
-the script side tracks herdr's integration version rather than pinning a
-copy that would go stale.
+(so the overwrite carries it instead of destroying it), injects a nix-store
+`python3` into that one hook command's PATH (the script hard-requires it
+but nothing else should see it), and re-runs `herdr integration install
+claude` on activation whenever herdr reports the hook script missing or
+outdated — so the script side tracks herdr's integration version rather
+than pinning a copy that would go stale.
 
 ## Adding a plugin
 
