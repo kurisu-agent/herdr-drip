@@ -41,9 +41,9 @@ herdr plugin log list --plugin drip.hello
 ## Config
 
 `config/herdr.toml` is the drip's curated herdr config — keybindings layered
-under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Alt+Shift+arrows` for pane
-focus), sidebar rows wired to the plugins' `$worktree` token, and the
-experimental kitty-graphics switch. Adopt it with:
+under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Ctrl+b [` to flip a split,
+`Alt+Shift+arrows` for pane focus), sidebar rows wired to the plugins'
+`$worktree` token, and the experimental kitty-graphics switch. Adopt it with:
 
 ```
 ./scripts/apply-config.sh
@@ -111,6 +111,36 @@ but nothing else should see it), and re-runs `herdr integration install
 claude` on activation whenever herdr reports the hook script missing or
 outdated — so the script side tracks herdr's integration version rather
 than pinning a copy that would go stale.
+
+## flip-split: why the round trip
+
+`Ctrl+b [` flips the split holding the focused pane — two columns become two
+rows and back. herdr has no rotate or transpose command, and the obvious
+routes are both dead ends: `layout.apply` can express any orientation but
+builds a **new** tab with fresh terminals and closes the old one, which would
+kill the agents running in those panes, and `pane move` within the same tab
+short-circuits as a no-op (`PaneMoveReason::SameTab`).
+
+What does work is a round trip through a scratch tab:
+
+```
+herdr pane move <second> --new-tab
+herdr pane move <second> --tab <original> --target-pane <first> --split down
+```
+
+Both hops cross a tab boundary, so neither is a no-op, and herdr re-parents
+the **live** pane rather than respawning it, so the agents keep running. The
+scratch tab deletes itself when its last pane leaves, and omitting `--focus`
+leaves focus where it was.
+
+The plugin always moves the second (right/bottom) pane onto the first, so the
+visible order survives regardless of which pane is focused. It only acts when
+the split's two children are both panes — a move relocates one pane, not a
+subtree — so inside a nested layout it flips the leaf pair you are in and
+says so when the sibling is a whole group.
+
+Note that `Ctrl+b [` is herdr's default copy-mode key; the config unbinds
+copy mode to free it.
 
 ## Adding a plugin
 

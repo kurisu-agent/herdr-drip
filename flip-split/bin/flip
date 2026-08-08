@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Flip the orientation of the split holding the focused pane: two columns
+# become two rows, and back.
+#
+# herdr has no rotate/transpose command, and `pane move` within the SAME tab
+# is an explicit no-op (PaneMoveReason::SameTab), so the flip is a round
+# trip: move the second pane out to a scratch tab, then back onto the first
+# with the opposite split direction. Both hops cross a tab boundary, so
+# neither is a no-op, and herdr re-parents the LIVE pane rather than
+# respawning it, so agents running in these panes keep running. The scratch
+# tab deletes itself when its last pane leaves.
+#
+# Only a split whose two children are both panes can flip this way, because
+# a move relocates one pane, not a subtree. That is the common 2-pane case
+# and the pairs inside a nested layout; anything else says so and stops.
+set -euo pipefail
+
+herdr=${HERDR_BIN_PATH:-herdr}
+
+note() {
+  "$herdr" notification show "Flip split" --body "$1" >/dev/null 2>&1 || true
+}
+
+layout=$("$herdr" pane layout --current | jq -c '.result.layout // empty')
+if [[ -z $layout ]]; then
+  note "could not read the pane layout"
+  exit 0
+fi
+
+# Moving a pane is refused outright while a tab is zoomed.
+if [[ $(jq -r '.zoomed' <<<"$layout") == true ]]; then
+  note "unzoom the tab first — pane moves are ignored while zoomed"
+  exit 0
+fi
+
+tab=$(jq -r '.tab_id' <<<"$layout")
+focused=$(jq -r '.focused_pane_id' <<<"$layout")
+frect=$(jq -c --arg p "$focused" '.panes[] | select(.pane_id == $p) | .rect' <<<"$layout")
+if [[ -z $frect ]]; then
+  note "could not locate the focused pane"
+  exit 0
+fi
+
+# The focused pane's parent split is the smallest split whose rect encloses it.
+parent=$(jq -c --argjson f "$frect" '
+  [ .splits[]
+    | select(.rect.x <= $f.x and .rect.y <= $f.y
+        and (.rect.x + .rect.width)  >= ($f.x + $f.width)
+        and (.rect.y + .rect.height) >= ($f.y + $f.height)) ]
+  | sort_by(.rect.width * .rect.height) | first // empty' <<<"$layout")
+if [[ -z $parent ]]; then
+  note "this pane is alone in its tab — nothing to flip against"
+  exit 0
+fi
+
+# Both children must be leaf panes: exactly two panes inside the parent rect.
+pair=$(jq -c --argjson s "$parent" '
+  [ .panes[]
+    | select(.rect.x >= $s.rect.x and .rect.y >= $s.rect.y
+        and (.rect.x + .rect.width)  <= ($s.rect.x + $s.rect.width)
+        and (.rect.y + .rect.height) <= ($s.rect.y + $s.rect.height)) ]' <<<"$layout")
+if [[ $(jq -r 'length' <<<"$pair") -ne 2 ]]; then
+  note "only a pane paired with one other pane can flip; this split holds a nested group"
+  exit 0
+fi
+
+old=$(jq -r '.direction' <<<"$parent")
+ratio=$(jq -r '.ratio' <<<"$parent")
+# "right" means the panes sit side by side, "down" means stacked.
+if [[ $old == right ]]; then axis=x; new=down; else axis=y; new=right; fi
+
+# Always move the second (right/bottom) pane onto the first, so the visible
+# order survives the flip no matter which of the two is focused.
+first=$(jq -r --arg k "$axis" 'sort_by(.rect[$k]) | first | .pane_id' <<<"$pair")
+second=$(jq -r --arg k "$axis" 'sort_by(.rect[$k]) | last | .pane_id' <<<"$pair")
+
+"$herdr" pane move "$second" --new-tab >/dev/null
+
+# From here the pane is parked in a scratch tab: if the return trip fails,
+# put it back the way it was rather than leaving it stranded there.
+if ! "$herdr" pane move "$second" --tab "$tab" --target-pane "$first" \
+  --split "$new" --ratio "$ratio" >/dev/null; then
+  "$herdr" pane move "$second" --tab "$tab" --target-pane "$first" \
+    --split "$old" --ratio "$ratio" >/dev/null 2>&1 || true
+  note "could not flip the split; the pane was returned to its original place"
+  exit 0
+fi

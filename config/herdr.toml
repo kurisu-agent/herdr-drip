@@ -31,6 +31,7 @@ default_shell = "yolo-shell"
 split_vertical = "prefix+r"   # Ctrl+b r — pane to the right
 split_horizontal = "prefix+d" # Ctrl+b d — pane below
 resize_mode = ""              # frees prefix+r; resizing is done by mouse
+copy_mode = ""                # frees prefix+[ for flip-split; select with the mouse
 # close_pane stays on the default prefix+x (Ctrl+b x)
 
 # Pane navigation: Alt+Shift+arrows. Left/right move panes only; up/down
@@ -49,6 +50,13 @@ description = "focus up / previous space"
 key = "alt+shift+down"
 command = "herdr plugin action invoke down --plugin drip.smart-focus"
 description = "focus down / next space"
+
+# Ctrl+b [ — two columns become two rows and back. Takes over the key herdr
+# gives copy mode by default, which is unbound above.
+[[keys.command]]
+key = "prefix+["
+command = "herdr plugin action invoke flip --plugin drip.flip-split"
+description = "flip split orientation"
 
 [experimental]
 kitty_graphics = true

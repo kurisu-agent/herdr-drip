@@ -1,0 +1,12 @@
+id = "drip.flip-split"
+name = "Flip split"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Flip the orientation of the split holding the focused pane — two columns become two rows"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "flip"
+title = "Flip split orientation"
+contexts = ["workspace"]
+command = ["bin/flip"]
