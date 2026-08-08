@@ -1,6 +1,33 @@
-#!/bin/sh
-# herdr's default_shell: every new interactive pane starts claude in yolo
-# mode (the `yolo` zsh alias, inlined — aliases don't resolve here), and
-# exiting claude lands in a normal shell instead of closing the pane.
-claude --dangerously-skip-permissions
+#!/usr/bin/env zsh
+# herdr's default_shell: every new interactive pane starts claude in yolo mode,
+# and exiting claude lands in a normal shell instead of closing the pane.
+#
+# "yolo mode" is the `yolo` COMMAND when one is on PATH (e.g. a gumbo
+# multi-account gateway launcher that routes claude through a local account pool
+# and stamps a per-launch session id the statusline reads); otherwise plain
+# `claude --dangerously-skip-permissions`. We call the command rather than the
+# `yolo` shell alias/function so it resolves HERE, in a non-interactive script.
+#
+# On session restore herdr assumes default_shell is a plain shell and injects
+# the pane's agent resume command (`claude --resume <id>`) as terminal input
+# right after spawning us. Peek stdin before launching so that line becomes a
+# yolo resume instead of landing verbatim in the fresh claude's chat box. The
+# injected bytes are written before the shell even starts, so they are already
+# buffered; the timeout is only slack for normal panes, where nothing arrives.
+launch() {
+  if command -v yolo >/dev/null 2>&1; then
+    yolo "$@"
+  else
+    claude --dangerously-skip-permissions "$@"
+  fi
+}
+
+line=
+IFS= read -r -t 0.5 line || true
+case $line in
+  claude)     launch ;;
+  claude\ *)  eval "launch ${line#claude }" ;;
+  ?*)         eval "$line" ;;
+  *)          launch ;;
+esac
 exec zsh -i

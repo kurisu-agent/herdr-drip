@@ -7,6 +7,8 @@ delivery = "herdr"
 
 [ui]
 show_agent_labels_on_pane_borders = true
+# Needs herdr >= 0.8.0; older servers ignore unknown keys with a warning.
+tab_bar_position = "bottom"
 
 agent_panel_sort = "priority"
 [theme]

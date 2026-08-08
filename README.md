@@ -62,6 +62,13 @@ from the flake instead:
 nix profile add github:kurisu-agent/herdr-drip#yolo-shell
 ```
 
+`yolo-shell` also cooperates with herdr's native agent session restore:
+after a server restart, herdr assumes `default_shell` is a plain shell and
+types each pane's `claude --resume <id>` into it. Since our panes boot
+straight into claude, the script peeks stdin before launching and replays
+that injected line through the same yolo launcher, so the pane comes back
+resumed instead of the line landing in a fresh claude's chat box.
+
 Caveat: `default_shell` (and every other bare command in the config and
 plugin manifests) is resolved against the herdr **server's** PATH, not your
 shell's — and a server launched by systemd or nix usually has no
