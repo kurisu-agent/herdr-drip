@@ -13,9 +13,12 @@
 # inherit) to name the launcher explicitly -- a wrapper under a different name,
 # an absolute path, or `claude --dangerously-skip-permissions` to opt a host out
 # of a `yolo` that happens to be on its PATH. It is a command line, not a path:
-# extra words are passed through as leading arguments.
+# extra words are passed through as leading arguments, and it is split the way
+# the shell would split it -- (z) parses it into words honouring quotes, (Q)
+# then strips those quotes -- so an argument that contains a space survives if
+# it is quoted. No eval: the words become argv directly.
 if [[ -n ${YOLO_SHELL_LAUNCHER:-} ]]; then
-  launcher=( ${=YOLO_SHELL_LAUNCHER} )
+  launcher=( ${(Q)${(z)YOLO_SHELL_LAUNCHER}} )
 elif command -v yolo >/dev/null 2>&1; then
   launcher=( yolo )
 else
