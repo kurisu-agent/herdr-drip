@@ -2,32 +2,50 @@
 # herdr's default_shell: every new interactive pane starts claude in yolo mode,
 # and exiting claude lands in a normal shell instead of closing the pane.
 #
-# "yolo mode" is the `yolo` COMMAND when one is on PATH (e.g. a gumbo
-# multi-account gateway launcher that routes claude through a local account pool
-# and stamps a per-launch session id the statusline reads); otherwise plain
-# `claude --dangerously-skip-permissions`. We call the command rather than the
-# `yolo` shell alias/function so it resolves HERE, in a non-interactive script.
+# "yolo mode" is whatever $YOLO_SHELL_LAUNCHER names; with it unset, the `yolo`
+# COMMAND when one is on PATH (e.g. a gumbo multi-account gateway launcher that
+# routes claude through a local account pool and stamps a per-launch session id
+# the statusline reads); otherwise plain `claude --dangerously-skip-permissions`.
+# We call the command rather than the `yolo` shell alias/function so it resolves
+# HERE, in a non-interactive script.
 #
-# On session restore herdr assumes default_shell is a plain shell and injects
-# the pane's agent resume command (`claude --resume <id>`) as terminal input
-# right after spawning us. Peek stdin before launching so that line becomes a
-# yolo resume instead of landing verbatim in the fresh claude's chat box. The
-# injected bytes are written before the shell even starts, so they are already
-# buffered; the timeout is only slack for normal panes, where nothing arrives.
+# Set YOLO_SHELL_LAUNCHER in the herdr SERVER's environment (that is what panes
+# inherit) to name the launcher explicitly -- a wrapper under a different name,
+# an absolute path, or `claude --dangerously-skip-permissions` to opt a host out
+# of a `yolo` that happens to be on its PATH. It is a command line, not a path:
+# extra words are passed through as leading arguments.
+if [[ -n ${YOLO_SHELL_LAUNCHER:-} ]]; then
+  launcher=( ${=YOLO_SHELL_LAUNCHER} )
+elif command -v yolo >/dev/null 2>&1; then
+  launcher=( yolo )
+else
+  launcher=( claude --dangerously-skip-permissions )
+fi
+
 launch() {
-  if command -v yolo >/dev/null 2>&1; then
-    yolo "$@"
-  else
-    claude --dangerously-skip-permissions "$@"
-  fi
+  "${launcher[@]}" "$@"
 }
 
+# On session restore herdr assumes default_shell is a plain shell and injects
+# the pane's agent command (`claude --resume <id>`) as terminal input right
+# after spawning us. Peek stdin before launching so that line becomes a yolo
+# resume instead of landing verbatim in the fresh claude's chat box. The
+# injected bytes are written before the shell even starts, so they are already
+# buffered; the timeout is only slack for normal panes, where nothing arrives.
+#
+# Match on the command's BASENAME, not the literal word `claude`: herdr injects
+# whatever path it launched the agent with, and since 0.8.0 that is an absolute
+# one (`/home/you/.claude/cc/current/claude --resume <id>`). Patterns anchored
+# on the bare word missed it, so every injected pane fell through to the
+# eval-verbatim arm below and ran claude DIRECTLY -- silently unrouted, which
+# on a gumbo host means no account pool and no session id. Anything that is not
+# a claude keeps running verbatim: herdr may inject a real command, and second-
+# guessing it is not our business.
 line=
 IFS= read -r -t 0.5 line || true
-case $line in
-  claude)     launch ;;
-  claude\ *)  eval "launch ${line#claude }" ;;
-  ?*)         eval "$line" ;;
-  *)          launch ;;
+first=${line%% *}
+case ${first:t} in
+  ''|claude) eval "launch ${line#"$first"}" ;;
+  *)         eval "$line" ;;
 esac
 exec zsh -i

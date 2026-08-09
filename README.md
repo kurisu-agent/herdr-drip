@@ -62,12 +62,38 @@ from the flake instead:
 nix profile add github:kurisu-agent/herdr-drip#yolo-shell
 ```
 
+### Which launcher a pane gets
+
+`yolo-shell` starts panes through, in order: `$YOLO_SHELL_LAUNCHER` if set,
+else a `yolo` command if one is on PATH, else plain
+`claude --dangerously-skip-permissions`. Nothing here knows what `yolo` is —
+on our hosts it is [gumbo](https://github.com/kurisu-agent/gumbo)'s launcher,
+which routes claude through a local multi-account gateway and stamps a
+per-launch session id, but any wrapper works.
+
+Set `YOLO_SHELL_LAUNCHER` in the herdr **server's** environment (panes inherit
+it) to name one explicitly — a differently-named wrapper, an absolute path, or
+`claude --dangerously-skip-permissions` to opt a host out of a `yolo` that
+happens to be on its PATH. It is a command line, not a path: extra words ride
+along as leading arguments.
+
+```
+YOLO_SHELL_LAUNCHER="/opt/bin/my-claude-wrapper --profile work" herdr
+```
+
 `yolo-shell` also cooperates with herdr's native agent session restore:
 after a server restart, herdr assumes `default_shell` is a plain shell and
-types each pane's `claude --resume <id>` into it. Since our panes boot
-straight into claude, the script peeks stdin before launching and replays
-that injected line through the same yolo launcher, so the pane comes back
-resumed instead of the line landing in a fresh claude's chat box.
+types each pane's claude command into it. Since our panes boot straight into
+claude, the script peeks stdin before launching and replays that injected line
+through the same launcher, so the pane comes back resumed instead of the line
+landing in a fresh claude's chat box.
+
+That replay matches the injected command by BASENAME. herdr injects whatever
+path it launched the agent with, and since 0.8.0 that is an absolute one
+(`/home/you/.claude/cc/current/claude --resume <id>`) — matching the bare word
+`claude`, as this script used to, silently missed it and ran that path
+directly. Panes looked fine and were simply unrouted: no gateway, no session
+id. Anything that is not a claude still runs verbatim.
 
 Caveat: `default_shell` (and every other bare command in the config and
 plugin manifests) is resolved against the herdr **server's** PATH, not your
