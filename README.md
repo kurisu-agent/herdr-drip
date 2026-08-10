@@ -95,6 +95,31 @@ path it launched the agent with, and since 0.8.0 that is an absolute one
 directly. Panes looked fine and were simply unrouted: no gateway, no session
 id. Anything that is not a claude still runs verbatim.
 
+### Panes that were shells come back as shells
+
+herdr only injects that line for panes that had an agent session; it respawns
+every OTHER pane with a bare `default_shell` — so a pane you had dropped out of
+claude to use as a terminal came back as a fresh claude, the restore quietly
+overwriting it. herdr's own state can't tell that pane from a brand new one: it
+clears `agent_session` when the agent exits, and the pane's label keeps claude's
+stale terminal title.
+
+So `yolo-shell` remembers, per pane, whether it is running the agent or a plain
+shell, under `${XDG_STATE_HOME:-~/.local/state}/herdr-drip/panes/<session>/`.
+On a spawn with nothing injected it starts claude as always — unless the record
+says this pane was a shell, which only happens on a restore, since a brand new
+pane has no record at all.
+
+`$HERDR_PANE_ID` is the key. herdr persists each workspace's public pane numbers
+and hands the same ones back after a restore, and the counter is monotonic —
+closing a pane never frees its number for reuse — so a record can never be read
+by a pane other than the one that wrote it. Named sessions have their own id
+space, hence the per-session directory. Records for panes that are gone are
+pruned after 30 days; every restore rewrites the ones still alive.
+
+Records only exist for panes started by a `yolo-shell` that has this, so panes
+already open when you adopt it come back as claude once, then record themselves.
+
 Caveat: `default_shell` (and every other bare command in the config and
 plugin manifests) is resolved against the herdr **server's** PATH, not your
 shell's — and a server launched by systemd or nix usually has no

@@ -1,6 +1,8 @@
 #!/usr/bin/env zsh
 # herdr's default_shell: every new interactive pane starts claude in yolo mode,
-# and exiting claude lands in a normal shell instead of closing the pane.
+# and exiting claude lands in a normal shell instead of closing the pane. A
+# session restore puts each pane back the way it was -- agent panes resumed,
+# shell panes still shells.
 #
 # "yolo mode" is whatever $YOLO_SHELL_LAUNCHER names; with it unset, the `yolo`
 # COMMAND when one is on PATH (e.g. a gumbo multi-account gateway launcher that
@@ -29,6 +31,42 @@ launch() {
   "${launcher[@]}" "$@"
 }
 
+# Remember what this pane is running, so the next session restore can put back
+# what was there. herdr respawns EVERY pane with default_shell and only injects
+# a resume line for the ones that had an agent session, so a pane the user had
+# dropped to a shell used to come back as a fresh claude -- the restore quietly
+# overwrote it. Nothing in herdr's persisted state distinguishes that pane from
+# a brand new one (it clears agent_session when the agent exits, and the label
+# keeps claude's stale terminal title), so we keep the fact ourselves.
+#
+# HERDR_PANE_ID is the key: herdr persists each workspace's public pane numbers
+# and hands the same ones back after a restore, and the counter is monotonic --
+# a closed pane's number is never reused -- so a record can never be read by a
+# different pane than the one that wrote it. Named sessions have separate id
+# spaces, hence the per-session directory. Every path below rewrites the file
+# within milliseconds of the pane starting, so a restore refreshes every live
+# pane and only records for panes that are long gone go stale; those are pruned
+# by age.
+#
+# zsh/files gives us mkdir and rm as builtins, so the bookkeeping does not care
+# what is on the herdr server's PATH -- the same reason the rest of the drip is
+# careful about it.
+zmodload -F zsh/files b:zf_mkdir b:zf_rm 2>/dev/null
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip/panes/${HERDR_SESSION:-default}
+state_file=
+if [[ -n ${HERDR_PANE_ID:-} ]] && zf_mkdir -p $state_dir 2>/dev/null; then
+  state_file=$state_dir/${HERDR_PANE_ID//[^A-Za-z0-9_:.-]/_}
+  for stale in $state_dir/*(N.m+30); do zf_rm -f -- $stale; done
+fi
+
+was=
+[[ -n $state_file && -r $state_file ]] && was=$(<$state_file)
+
+mark() {
+  [[ -n $state_file ]] && print -r -- $1 >| $state_file 2>/dev/null
+  return 0
+}
+
 # On session restore herdr assumes default_shell is a plain shell and injects
 # the pane's agent command (`claude --resume <id>`) as terminal input right
 # after spawning us. Peek stdin before launching so that line becomes a yolo
@@ -47,8 +85,16 @@ launch() {
 line=
 IFS= read -r -t 0.5 line || true
 first=${line%% *}
-case ${first:t} in
-  ''|claude) eval "launch ${line#"$first"}" ;;
-  *)         eval "$line" ;;
-esac
+if [[ -z $line && $was == shell ]]; then
+  # A restored pane that was a plain shell when the server went down. herdr has
+  # nothing to inject for it, so we are the only thing that would start claude
+  # here -- don't, and let it come back the shell it was.
+  :
+else
+  case ${first:t} in
+    ''|claude) mark agent; eval "launch ${line#"$first"}" ;;
+    *)         mark shell; eval "$line" ;;
+  esac
+fi
+mark shell
 exec zsh -i
