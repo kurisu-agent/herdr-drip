@@ -140,6 +140,34 @@ That is `yolo-shell` (default_shell), `bun` (worktree-graph's build and
 pane command), and `python3` (herdr's claude agent-state hook execs an
 inline python heredoc — and silently no-ops without it).
 
+### NixOS: the whole drip, declaratively
+
+The standard procedure for a NixOS host is one module import instead of the
+per-user commands above:
+
+```nix
+# flake input: herdr-drip.url = "github:kurisu-agent/herdr-drip";
+imports = [ herdr-drip.nixosModules.plugins ];
+services.herdr-drip.plugins.enable = true;
+```
+
+On every rebuild and boot it keeps each drip plugin installed **pinned to
+the flake input's rev** (bumping the input bumps the plugins), keeps
+`~/.config/herdr/config.toml` a symlink to the curated config, and puts
+`yolo-shell` + `bun` on the system PATH the herdr server resolves against.
+`python3` stays off the PATH — the claude-agent-state module below injects
+it scoped to the one hook that needs it.
+
+It never touches: plugins linked from a working tree (`herdr plugin link`
+wins — that is the dev loop), third-party plugins, a plugin's
+enabled/disabled state (except that a rev bump reinstalls in place, which
+re-enables), or a config.toml that is a plain file or a symlink outside the
+store (`apply-config.sh`'s link into a checkout stays). `link-all.sh` and
+`apply-config.sh` remain the working-tree dev loop this module defers to.
+
+`herdr-drip.nixosModules.default` is both halves — this module plus the
+claude-agent-state module below.
+
 ### NixOS + nix-claude-drip: keeping the claude integration alive
 
 `herdr integration install claude` adds a `hooks.SessionStart` entry to

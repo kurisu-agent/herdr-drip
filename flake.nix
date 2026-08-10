@@ -20,13 +20,9 @@
           pkgs = nixpkgs.legacyPackages.${system};
         in
         rec {
-          # config/herdr.toml resolves default_shell from PATH, so putting
-          # this package in your environment is all the wiring nix needs.
-          # claude and zsh stay PATH-resolved on purpose: the wrapper should
-          # ride whatever versions the host environment ships.
-          yolo-shell = pkgs.runCommandLocal "yolo-shell" { } ''
-            install -Dm755 ${./scripts/yolo-shell} $out/bin/yolo-shell
-          '';
+          # See nix/yolo-shell.nix — shared with the plugins module, which
+          # builds the same thing from the host's nixpkgs.
+          yolo-shell = import ./nix/yolo-shell.nix pkgs;
 
           # Everything the drip needs at runtime, resolved against the herdr
           # SERVER's PATH, in one profile add: yolo-shell (default_shell),
@@ -46,13 +42,30 @@
         }
       );
 
-      # For NixOS hosts running nix-claude-drip (services.claude-code):
-      # keeps herdr's claude agent-state integration alive across the
-      # settings.json overwrites that module performs on every rebuild and
-      # boot. See nix/claude-agent-state.nix.
       nixosModules = rec {
+        # For NixOS hosts running nix-claude-drip (services.claude-code):
+        # keeps herdr's claude agent-state integration alive across the
+        # settings.json overwrites that module performs on every rebuild and
+        # boot. See nix/claude-agent-state.nix.
         claude-agent-state = import ./nix/claude-agent-state.nix;
-        default = claude-agent-state;
+
+        # Declarative installs of the drip's plugins + curated config +
+        # runtime deps (see nix/plugins.nix). The wrapper pins installs to
+        # this flake's own rev, so a consumer bumping the flake input moves
+        # the installed plugins with it; a dirty checkout has no rev and the
+        # module warns instead of installing something unpinned.
+        plugins = {
+          imports = [ ./nix/plugins.nix ];
+          services.herdr-drip.plugins.ref = nixpkgs.lib.mkDefault (self.rev or null);
+        };
+
+        # The standard procedure: both halves.
+        default = {
+          imports = [
+            claude-agent-state
+            plugins
+          ];
+        };
       };
     };
 }
