@@ -142,8 +142,20 @@ inline python heredoc — and silently no-ops without it).
 
 ### NixOS: the whole drip, declaratively
 
-The standard procedure for a NixOS host is one module import instead of the
-per-user commands above:
+On a host running
+[nix-claude-drip](https://github.com/kurisu-agent/nix-claude-drip), the
+standard procedure is one knob upstream — the drip pins this repo and
+composes everything:
+
+```nix
+services.claude-code.herdr.enable = true;
+```
+
+That installs nix-claude-drip's pinned herdr **with the hardcore-plugin
+patch set below applied**, and enables both of this repo's modules: the
+plugin provisioning and the claude-agent-state hook keepalive.
+
+A host wiring herdr itself imports the modules directly instead:
 
 ```nix
 # flake input: herdr-drip.url = "github:kurisu-agent/herdr-drip";
@@ -151,12 +163,13 @@ imports = [ herdr-drip.nixosModules.plugins ];
 services.herdr-drip.plugins.enable = true;
 ```
 
-On every rebuild and boot it keeps each drip plugin installed **pinned to
-the flake input's rev** (bumping the input bumps the plugins), keeps
-`~/.config/herdr/config.toml` a symlink to the curated config, and puts
-`yolo-shell` + `bun` on the system PATH the herdr server resolves against.
-`python3` stays off the PATH — the claude-agent-state module below injects
-it scoped to the one hook that needs it.
+Either way, on every rebuild and boot the plugins module keeps each drip
+plugin installed **pinned to the herdr-drip rev the consumer locked**
+(bumping the input bumps the plugins), keeps `~/.config/herdr/config.toml`
+a symlink to the curated config, and puts `yolo-shell` + `bun` on the
+system PATH the herdr server resolves against. `python3` stays off the
+PATH — the claude-agent-state module below injects it scoped to the one
+hook that needs it.
 
 It never touches: plugins linked from a working tree (`herdr plugin link`
 wins — that is the dev loop), third-party plugins, a plugin's
@@ -174,8 +187,9 @@ claude-agent-state module below.
 `~/.claude/settings.json` — and nix-claude-drip installs that file by
 wholesale overwrite on every rebuild and boot, silently erasing the entry
 while `herdr integration status` keeps reporting `current` (it only stats
-the hook script). Hosts running `services.claude-code` should import the
-drip's module instead of installing by hand:
+the hook script). `services.claude-code.herdr.enable` (above) turns this
+module on automatically; a host wiring it by hand imports it directly
+instead of installing by hand:
 
 ```nix
 # flake input: herdr-drip.url = "github:kurisu-agent/herdr-drip";
