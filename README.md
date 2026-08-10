@@ -221,6 +221,39 @@ says so when the sibling is a whole group.
 Note that `Ctrl+b [` is herdr's default copy-mode key; the config unbinds
 copy mode to free it.
 
+## Hardcore plugins — patches on herdr itself
+
+Some of our opinions have no plugin surface to land on: sidebar chrome,
+built-in labels, behavior compiled into the binary. Those become **hardcore
+plugins** — source patches on herdr, curated in `nix/herdr-patches.nix` the
+same way the plugin directories curate everything else. Current set:
+
+- **sidebar-version** — the workspace-list header says `herdr <version>`
+  instead of the hardcoded `" spaces"`, so the running version is visible
+  somewhere in the UI.
+
+They apply as one function, so every host gets the identical set:
+
+```nix
+herdr-drip.lib.patchHerdr herdrPkg
+```
+
+nix-claude-drip's herdr knob applies it by default to whatever
+`services.claude-code.herdr.package` resolves to (opt out with
+`herdr.dripPatches = false`) — so a host overriding the package supplies an
+**unpatched** build and lets the module patch it; applying the set twice is
+a build error by design.
+
+Rules for adding one (they live as comments in the file too): patch with
+`substituteInPlace --replace-fail` or a context patch so a herdr bump that
+breaks the patch **fails the build loudly** instead of silently shedding it;
+give each patch a one-paragraph story (what it changes, why it can't be a
+real plugin); and when herdr grows a surface for it, graduate it into a
+plugin directory.
+
+Note the running herdr server keeps its old binary across a rebuild — the
+patch (like any herdr bump) appears after the server restarts.
+
 ## Adding a plugin
 
 Copy `hello/` to a new top-level directory and edit:

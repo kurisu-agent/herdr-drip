@@ -42,6 +42,12 @@
         }
       );
 
+      # Hardcore plugins — the drip's source patches on herdr itself, for
+      # what herdr has no plugin surface for. One function so every consumer
+      # applies the identical set; see nix/herdr-patches.nix for the rules
+      # (fail-loudly, one story per patch, never apply twice).
+      lib.patchHerdr = import ./nix/herdr-patches.nix;
+
       nixosModules = rec {
         # For NixOS hosts running nix-claude-drip (services.claude-code):
         # keeps herdr's claude agent-state integration alive across the
