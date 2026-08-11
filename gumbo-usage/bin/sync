@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# One pass: rewrite the sidebar's accounts rail and exit.
+#
+# Serves the same file the watcher does, so this is what to invoke after a
+# `gumbo login` or a `gumbo use` rather than waiting out the redraw interval.
+# It is NOT a way to poll Anthropic harder: the read still comes from gumbo's
+# cache unless that cache has aged out (--refresh is the flag for meaning it).
+set -uo pipefail
+
+out=${HERDR_DRIP_ACCOUNTS_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip/sidebar-accounts.txt}
+width=${HERDR_DRIP_ACCOUNTS_WIDTH:-21}
+
+if ! command -v gumbo >/dev/null 2>&1; then
+  echo "gumbo is not on the herdr server's PATH; nothing to refresh" >&2
+  exit 0
+fi
+
+exec gumbo watch --once --format compact --tags --width "$width" --out "$out" "$@"

@@ -195,6 +195,7 @@ in
       type = lib.types.listOf lib.types.str;
       default = [
         "flip-split"
+        "gumbo-usage"
         "pane-titles"
         "smart-focus"
         "worktree-graph"

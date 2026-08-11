@@ -30,5 +30,50 @@ herdrPkg.overrideAttrs (old: {
     # herdr version there instead, which the UI otherwise shows nowhere.
     substituteInPlace src/ui/sidebar.rs \
       --replace-fail '" spaces",' 'concat!(" herdr ", env!("CARGO_PKG_VERSION")),'
+
+    # sidebar-accounts: a rail under the agent list showing each Anthropic
+    # account's headroom and reset — how much time is left, per account, where
+    # you are already looking. herdr's plugin surface cannot reach it: pane
+    # placements are overlay/popup/split/tab/zoomed (no sidebar), and the
+    # sidebar's own row tokens are per-workspace and per-agent, with nothing
+    # global under them.
+    #
+    # The patched code reads ONE file and nothing else — no process, no
+    # credential, no knowledge of gumbo — so the thing it displays stays
+    # replaceable: drip.gumbo-usage feeds it with `gumbo watch --format compact
+    # --tags`, and with nothing feeding it every function returns empty and the
+    # sidebar is byte-identical to stock. See sidebar-accounts.rs for the
+    # format and the layout rules.
+    cat ${./sidebar-accounts.rs} >> src/ui/sidebar.rs
+
+    # The carve goes in herdr's OWN section geometry, not in the draw. Both
+    # `*_sidebar_sections` are what every consumer asks where the agent panel
+    # is — the renderer, the click hit-testing (app/input/sidebar.rs
+    # `agent_panel_rect`), the scroll metrics — so taking the rows here is what
+    # keeps a click on an account row from selecting the agent that used to be
+    # drawn under the pointer. Carving in the renderer alone would look right
+    # and mis-route every click on the rail.
+    # Every anchor below is ONE line, replaced by one line. Nix's indented
+    # strings strip the block's common leading whitespace, which silently eats
+    # the indentation of any continuation line inside a pattern — and a pattern
+    # that no longer matches is a build failure at best. Statements separated by
+    # `;` on a single line cost nothing here: rustfmt never sees this.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    let detail_area = Rect::new(content.x, content.y + ws_h, content.width, detail_h);' '    let detail_area = Rect::new(content.x, content.y + ws_h, content.width, detail_h); let (detail_area, _) = drip_accounts_split(detail_area, &drip_accounts_lines());'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    let detail_area = Rect::new(content.x, divider_y + 1, content.width, detail_h as u16);' '    let detail_area = Rect::new(content.x, divider_y + 1, content.width, detail_h as u16); let (detail_area, _) = drip_accounts_split_collapsed(detail_area, &drip_account_dots(&drip_accounts_lines()));'
+
+    # Expanded: draw the rail in the rows the carve left, under the agents.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    render_sidebar_toggle(app, frame, area, false, p);' '    drip_render_accounts(app, frame, drip_accounts_rect(area, detail_area, 0), &drip_accounts_lines()); render_sidebar_toggle(app, frame, area, false, p);'
+
+    # Collapsed: the same rail reduced to what three columns hold — one
+    # numbered row and one traffic-light dot per account, under the agent dots.
+    # Drawn before the agent rows rather than after, because the toggle call it
+    # would otherwise anchor on appears twice (the early return draws it too)
+    # and this spot appears once.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    let detail_content_area = Rect::new(' '    drip_render_accounts_collapsed(app, frame, drip_accounts_rect(area, detail_area, 1), &drip_account_dots(&drip_accounts_lines())); let detail_content_area = Rect::new('
   '';
 })

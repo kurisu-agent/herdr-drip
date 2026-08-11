@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Startup hook: keep the sidebar's accounts rail fed.
+#
+# All the work is `gumbo watch`'s: it owns the cache, the TTL and the backoff,
+# so the rail redraws on its own cadence while Anthropic's usage endpoint is
+# only actually read once every few minutes however often we look. This script
+# decides where the file goes and keeps the watcher alive; it holds no
+# credential and makes no request itself.
+#
+# The rail is a hardcore plugin (nix/herdr-patches.nix) that reads that one
+# file. No file, no rail — so a box without gumbo needs nothing turned off.
+set -uo pipefail
+
+out=${HERDR_DRIP_ACCOUNTS_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip/sidebar-accounts.txt}
+# ~21 columns is what the sidebar leaves at its default width (26) once the
+# separator and the rail's own margin are taken; `gumbo watch` lays out to fit.
+width=${HERDR_DRIP_ACCOUNTS_WIDTH:-21}
+interval=${HERDR_DRIP_ACCOUNTS_INTERVAL:-30}
+
+if ! command -v gumbo >/dev/null 2>&1; then
+  echo "gumbo is not on the herdr server's PATH; the accounts rail stays empty" >&2
+  exit 0
+fi
+
+# A watcher that exits immediately is telling us something permanent — no
+# store on this box, an unreadable config, no accounts. Retrying that forever
+# would be a log full of the same line, so give up after a few and say why.
+# A watcher that ran for a while and then died (a daemon restart, a transient
+# store error) is worth respawning, and resets the count.
+failures=0
+while :; do
+  started=$SECONDS
+  gumbo watch --format compact --tags --width "$width" --interval "$interval" --out "$out"
+  if ((SECONDS - started < 5)); then
+    ((failures++))
+    if ((failures >= 5)); then
+      echo "gumbo watch exited immediately $failures times; giving up on the accounts rail" >&2
+      exit 0
+    fi
+  else
+    failures=0
+  fi
+  sleep 30
+done

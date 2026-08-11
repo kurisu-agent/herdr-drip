@@ -256,6 +256,60 @@ says so when the sibling is a whole group.
 Note that `Ctrl+b [` is herdr's default copy-mode key; the config unbinds
 copy mode to free it.
 
+## gumbo-usage: how much Claude you have left, in the sidebar
+
+Under the agent list, one rail per Anthropic account: a traffic-light dot, the
+5h window's meter and when it resets, the 7d window under it.
+
+```
+──────────────────────
+ accounts
+▸● hext2   ▰▰▱▱▱  11m
+        7d ▰▰▰▰▱   5d
+ ● hext3   ▱▱▱▱▱ 3h31
+        7d ▱▱▱▱▱   6d
+ ○ hext1   inference
+```
+
+`▸` marks where the next session lands. Each row is coloured by its OWN window,
+so a green hour above a red week reads as two facts; the dot takes the worse of
+the two, because one dot cannot say "roomy hour, spent week" and only the
+pessimistic answer is safe to start a session on. Collapse the sidebar and the
+rail collapses with it, to a numbered dot per account in the same three columns
+the agents use.
+
+Three pieces, deliberately:
+
+- **[gumbo](https://github.com/kurisu-agent/gumbo) `watch`** does the reading.
+  It caches to `~/.cache/gumbo` and only goes to Anthropic's usage endpoint
+  when that cache has aged out, so the rail redraws every 30s while the
+  endpoint is read every 5 minutes — which matters, because that endpoint's
+  rate limit is per IP and losing it blinds every account on the box at once.
+- **`drip.gumbo-usage`** (this plugin) runs `gumbo watch --format compact
+  --tags --out <file>` from a `[[startup]]` hook and keeps it alive.
+- **the `sidebar-accounts` hardcore patch** reads that one file and draws it.
+
+The patch knows nothing about gumbo — it reads tagged lines
+(`<severity><kind> <text>`) and paints them. Anything that writes that format
+feeds the rail, and when nothing does, every function in it returns empty and
+the sidebar is byte-identical to stock herdr. A file older than ten minutes
+counts as nothing: a watcher that died leaves its last frame behind, and
+hour-old headroom shown as current is the number you would act on.
+
+Overrides, for a wider sidebar or a different cadence — set them in the herdr
+**server's** environment:
+
+```
+HERDR_DRIP_ACCOUNTS_FILE      # default: $XDG_STATE_HOME/herdr-drip/sidebar-accounts.txt
+HERDR_DRIP_ACCOUNTS_WIDTH     # default: 21 (fits herdr's 26-column sidebar)
+HERDR_DRIP_ACCOUNTS_INTERVAL  # default: 30 (seconds between redraws, NOT between polls)
+```
+
+`gumbo` must be on the herdr server's PATH — it is not a dependency of this
+repo, and a host without it simply gets no rail (the plugin says so once in its
+log and exits). `herdr plugin action invoke sync --plugin drip.gumbo-usage`
+redraws now, after a `gumbo login` or a `gumbo use`.
+
 ## Hardcore plugins — patches on herdr itself
 
 Some of our opinions have no plugin surface to land on: sidebar chrome,
@@ -266,6 +320,14 @@ same way the plugin directories curate everything else. Current set:
 - **sidebar-version** — the workspace-list header says `herdr <version>`
   instead of the hardcoded `" spaces"`, so the running version is visible
   somewhere in the UI.
+- **sidebar-accounts** — the accounts rail above. herdr's plugin surface
+  cannot reach the sidebar at all: pane placements are
+  overlay/popup/split/tab/zoomed, and the sidebar's own row tokens are
+  per-workspace and per-agent with nothing global under them. Note that the
+  rows are carved off the agent panel in herdr's `*_sidebar_sections`, not in
+  the renderer — those functions are what the click hit-testing and the scroll
+  metrics ask where the agent panel is, so carving anywhere else would look
+  right and mis-route every click on the rail.
 
 They apply as one function, so every host gets the identical set:
 

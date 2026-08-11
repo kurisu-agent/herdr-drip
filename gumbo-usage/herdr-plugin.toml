@@ -1,0 +1,21 @@
+id = "drip.gumbo-usage"
+name = "Gumbo usage"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Feed the sidebar's accounts rail: each Anthropic account's 5h/7d headroom and reset time, from gumbo"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["bin/watch"]
+
+[[actions]]
+id = "sync"
+title = "Refresh the accounts rail now"
+contexts = ["workspace"]
+command = ["bin/sync"]
+
+[[actions]]
+id = "watch"
+title = "Start the accounts watcher"
+contexts = ["workspace"]
+command = ["bin/watch"]
