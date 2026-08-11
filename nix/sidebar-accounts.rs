@@ -150,6 +150,20 @@ fn drip_severity_color(severity: char, p: &Palette) -> ratatui::style::Color {
     }
 }
 
+/// Where the meter starts in a row, in characters — the boundary between what
+/// names the account and what measures this row.
+///
+/// Found by looking for the meter's own cells rather than by counting columns,
+/// because the writer owns the layout: gumbo sizes the name column to whatever
+/// width it was given, and `▰`/`▱` are the one thing in a row that can only be
+/// a meter. A row with no meter at all (an inference-only account, a note) has
+/// no boundary, and the whole row reads as identity.
+fn drip_meter_column(text: &str) -> usize {
+    text.chars()
+        .position(|c| c == '▰' || c == '▱')
+        .unwrap_or_else(|| text.chars().count())
+}
+
 /// One severity per ACCOUNT: the worst grade from each opening row up to the
 /// next one. A single dot cannot say "roomy hour, spent week", and of the two
 /// answers only the pessimistic one is safe to start a session on.
@@ -259,10 +273,12 @@ pub(crate) fn drip_render_accounts(
 
         let severity = dots.get(account).copied().unwrap_or(line.severity);
         account += 1;
-        // The first two columns are the marker and the dot; everything after
-        // them is this row's own reading.
-        let head: String = line.text.chars().take(2).collect();
-        let rest: String = line.text.chars().skip(2).collect();
+        // Marker, dot and NAME are the account's identity and take the
+        // account's grade together; the meter and its eta are this row's own
+        // reading and keep their own colour.
+        let split = drip_meter_column(&line.text);
+        let head: String = line.text.chars().take(split).collect();
+        let rest: String = line.text.chars().skip(split).collect();
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
@@ -402,6 +418,25 @@ mod drip_accounts_tests {
 
         // A green hour over a red week is a red account: one dot, worst news.
         assert_eq!(drip_account_dots(&lines), vec!['r', 'g']);
+    }
+
+    #[test]
+    fn the_account_colour_covers_the_name_and_stops_at_the_meter() {
+        // The dot, the marker and the name are one statement about the
+        // account; the meter beside them is a statement about one window.
+        let row = "▸● hext2   ▰▰▱▱▱  11m";
+        let split = drip_meter_column(row);
+
+        assert_eq!(row.chars().take(split).collect::<String>(), "▸● hext2   ");
+        assert_eq!(row.chars().skip(split).collect::<String>(), "▰▰▱▱▱  11m");
+    }
+
+    #[test]
+    fn a_row_with_no_meter_is_all_identity() {
+        // "inference", "DEAD", "no usage": nothing was measured, so there is
+        // no reading to colour differently from the name.
+        let row = " ○ hext1   inference";
+        assert_eq!(drip_meter_column(row), row.chars().count());
     }
 
     #[test]

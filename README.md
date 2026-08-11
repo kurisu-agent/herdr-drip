@@ -272,13 +272,18 @@ Under the agent list, one rail per Anthropic account: a traffic-light dot, the
  ○ hext1   inference
 ```
 
-`▸` marks where the next session lands. Each row is coloured by its OWN window,
-so a green hour above a red week reads as two facts — while the **dot** takes
-the worst of the account's rows, so a walled 5h or 7d turns it red even when
-the meter beside it is green and honest. One dot cannot say "roomy hour, spent
-week", and of the two answers only the pessimistic one is safe to start a
-session on. Collapse the sidebar and the rail collapses with it, to a numbered
-dot per account in the same three columns the agents use.
+`▸` marks where the next session lands.
+
+Two colours per account row, split at the meter's first cell. The **dot, the
+marker and the name** are the account, so they take the worst of its rows: a
+walled 5h or 7d turns them red. The **meter and its reset** are one window, so
+they keep their own grade — which is why a red name can sit beside an honest
+green 5h meter, with the red explained by the 7d row under it. One dot cannot
+say "roomy hour, spent week", and of the two answers only the pessimistic one
+is safe to start a session on.
+
+Collapse the sidebar and the rail collapses with it, to a numbered dot per
+account in the same three columns the agents use.
 
 Three pieces, deliberately:
 
