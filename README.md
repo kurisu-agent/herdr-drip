@@ -43,7 +43,10 @@ herdr plugin log list --plugin drip.hello
 `config/herdr.toml` is the drip's curated herdr config — keybindings layered
 under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Ctrl+b [` to flip a split,
 `Alt+Shift+arrows` for pane focus), sidebar rows wired to the plugins'
-`$worktree` token, and the experimental kitty-graphics switch. Adopt it with:
+`$worktree` token, a tab bar that hides itself while there is only one tab
+(`hide_tab_bar_when_single_tab` — one tab is not a choice, so the row showing
+it is a line of terminal spent on nothing), and the experimental
+kitty-graphics switch. Adopt it with:
 
 ```
 ./scripts/apply-config.sh
