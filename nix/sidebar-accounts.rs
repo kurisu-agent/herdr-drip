@@ -29,6 +29,15 @@ const DRIP_COLLAPSED_AGENT_FLOOR: u16 = 2;
 /// entry of the list.
 const DRIP_HEADER_ROWS: u16 = 3;
 
+/// One row kept BELOW the last account, so the rail does not sit flush on the
+/// bottom edge of the sidebar. It is breathing room first, but it is also
+/// correctness: `expanded_sidebar_toggle_rect` puts the `«` toggle on
+/// `area.height - 1`, so a rail drawn to the bottom shares its last row with
+/// the toggle and the widest account row runs into it. The collapsed rail
+/// already reserved this row (`drip_accounts_rect(.., 1)`); the expanded one
+/// passed 0 and was the odd one out.
+const DRIP_FOOTER_ROWS: u16 = 1;
+
 /// A file older than this is treated as absent. A watcher that was killed
 /// leaves its last frame on disk, and hour-old headroom presented as current is
 /// worse than no headroom at all: it is the number you would act on.
@@ -201,12 +210,15 @@ pub(crate) fn drip_accounts_split(detail: Rect, lines: &[DripAccountLine]) -> (R
     if lines.is_empty() || detail.width == 0 {
         return (detail, Rect::default());
     }
-    // A separator, a header, a blank line, then the rows. The blank is not
-    // decoration: without it the first account's row reads as part of the
-    // header, the same way the agent list gets one.
-    let wanted = lines.len() as u16 + DRIP_HEADER_ROWS;
+    // A separator, a header, a blank line, then the rows, then one blank row
+    // under them. The blank above is not decoration: without it the first
+    // account's row reads as part of the header, the same way the agent list
+    // gets one. The blank BELOW is carved here but never drawn -- the rail's
+    // rect stops short of it (`drip_accounts_rect`'s `reserved`), so it is
+    // taken from the agent panel exactly once rather than eating an account.
+    let wanted = lines.len() as u16 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS;
     let rows = wanted.min(detail.height.saturating_sub(DRIP_AGENT_PANEL_FLOOR));
-    if rows < 3 {
+    if rows < DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS {
         return (detail, Rect::default());
     }
     let split = detail.height - rows;
@@ -457,8 +469,11 @@ mod drip_accounts_tests {
         assert!(tall.0.height >= DRIP_AGENT_PANEL_FLOOR);
         // Whatever the split, the two halves tile the area they came from.
         assert_eq!(tall.0.height + tall.1.height, 40);
-        // Separator, title, blank, then one row per line.
-        assert_eq!(tall.1.height, lines.len() as u16 + DRIP_HEADER_ROWS);
+        // Separator, title, blank, one row per line, then the footer blank.
+        assert_eq!(
+            tall.1.height,
+            lines.len() as u16 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS
+        );
 
         // Too short to give the rail three rows without starving the agents:
         // the agent panel keeps the whole area and the rail draws nothing.

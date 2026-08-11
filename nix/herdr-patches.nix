@@ -99,8 +99,12 @@ herdrPkg.overrideAttrs (old: {
       --replace-fail '    let detail_area = Rect::new(content.x, divider_y + 1, content.width, detail_h as u16);' '    let detail_area = Rect::new(content.x, divider_y + 1, content.width, detail_h as u16); let (detail_area, _) = drip_accounts_split_collapsed(detail_area, &drip_account_dots(&drip_accounts_lines()));'
 
     # Expanded: draw the rail in the rows the carve left, under the agents.
+    # `DRIP_FOOTER_ROWS` rather than 0 keeps the rail off the sidebar's last
+    # row — which is both a blank line under the accounts and the row
+    # `expanded_sidebar_toggle_rect` draws `«` into. The collapsed call below
+    # has always reserved it; this one had not.
     substituteInPlace src/ui/sidebar.rs \
-      --replace-fail '    render_sidebar_toggle(app, frame, area, false, p);' '    drip_render_accounts(app, frame, drip_accounts_rect(area, detail_area, 0), &drip_accounts_lines()); render_sidebar_toggle(app, frame, area, false, p);'
+      --replace-fail '    render_sidebar_toggle(app, frame, area, false, p);' '    drip_render_accounts(app, frame, drip_accounts_rect(area, detail_area, DRIP_FOOTER_ROWS), &drip_accounts_lines()); render_sidebar_toggle(app, frame, area, false, p);'
 
     # Collapsed: the same rail reduced to what three columns hold — one
     # numbered row and one traffic-light dot per account, under the agent dots.
