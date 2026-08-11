@@ -166,10 +166,28 @@ services.herdr-drip.plugins.enable = true;
 Either way, on every rebuild and boot the plugins module keeps each drip
 plugin installed **pinned to the herdr-drip rev the consumer locked**
 (bumping the input bumps the plugins), keeps `~/.config/herdr/config.toml`
-a symlink to the curated config, and puts `yolo-shell` + `bun` on the
-system PATH the herdr server resolves against. `python3` stays off the
-PATH — the claude-agent-state module below injects it scoped to the one
-hook that needs it.
+a symlink to the drip's config (curated defaults + your overrides, below),
+and puts `yolo-shell` + `bun` on the system PATH the herdr server resolves
+against. `python3` stays off the PATH — the claude-agent-state module below
+injects it scoped to the one hook that needs it.
+
+Every curated setting is a **default, not a mandate**: the managed config is
+generated from `services.herdr-drip.plugins.settings` (freeform TOML as Nix
+values) with `config/herdr.toml` layered underneath key by key, so
+overriding one setting keeps all the others:
+
+```nix
+services.herdr-drip.plugins.settings = {
+  ui.tab_bar_position = "top"; # curated default: "bottom"
+  theme.name = "gruvbox";
+};
+```
+
+Lists override wholesale — `keys.command` is one value, not one per entry —
+and `lib.mkForce` on a subtree drops its curated contents entirely. The
+generated file is comment-free; the commentary lives in the tracked
+`config/herdr.toml`, which is still exactly what `apply-config.sh` links on
+non-nix hosts (where overriding means editing your linked checkout).
 
 It never touches: plugins linked from a working tree (`herdr plugin link`
 wins — that is the dev loop), third-party plugins, a plugin's

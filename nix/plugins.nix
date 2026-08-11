@@ -9,8 +9,10 @@
 #     `nixosModules.plugins` defaults `ref` to the flake's own rev, so the
 #     consumer's flake input decides exactly which plugin code runs and a
 #     `nix flake update herdr-drip` moves it;
-#   - keeps ~/.config/herdr/config.toml a symlink to the curated
-#     config/herdr.toml (store copy), unless the user has taken it over;
+#   - keeps ~/.config/herdr/config.toml a symlink to a GENERATED config,
+#     unless the user has taken it over: the curated config/herdr.toml
+#     layered under the host's `settings` overrides, key by key — the
+#     curated values are defaults, not mandates;
 #   - puts the runtime deps on the system PATH: yolo-shell (the config's
 #     PATH-resolved default_shell) and bun (worktree-graph's [[build]] and
 #     pane command). Commands resolve against the herdr SERVER's PATH, and
@@ -54,10 +56,18 @@ let
     id = (builtins.fromTOML (builtins.readFile (../. + "/${name}/herdr-plugin.toml"))).id;
   }) cfg.plugins;
 
-  # The curated config as a store path. Its hash changes with its content,
+  settingsFormat = pkgs.formats.toml { };
+
+  # The curated config as data. It enters the module system below as
+  # leaf-level mkDefaults, so a host overrides one key and keeps the rest;
+  # the tracked TOML stays the single source of truth for the non-nix path
+  # (apply-config.sh links it verbatim).
+  curatedSettings = builtins.fromTOML (builtins.readFile ../config/herdr.toml);
+
+  # The merged config as a store path. Its hash changes with its content,
   # which is exactly what the relink check keys off: a symlink to an OLD
   # store copy means a previous generation's config, and is retargeted.
-  configFile = ../config/herdr.toml;
+  configFile = settingsFormat.generate "herdr.toml" cfg.settings;
 
   yoloShell = import ./yolo-shell.nix pkgs;
 
@@ -235,19 +245,45 @@ in
       '';
     };
 
+    settings = lib.mkOption {
+      type = settingsFormat.type;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          ui.tab_bar_position = "top";
+          theme.name = "gruvbox";
+        }
+      '';
+      description = ''
+        herdr config (config.toml) as Nix values. The drip's curated
+        config/herdr.toml sits underneath as leaf-level defaults, so a key
+        set here overrides just that key and every other curated setting
+        stays. Lists are leaves — overriding e.g. `keys.command` replaces
+        the whole list, not one entry. `lib.mkForce` a subtree to drop the
+        curated contents of it entirely. Only consulted while
+        `manageConfig` is true.
+      '';
+    };
+
     manageConfig = lib.mkOption {
       type = lib.types.bool;
       default = true;
       description = ''
-        Keep ~/.config/herdr/config.toml a symlink to this repo's curated
-        config (the store copy). Never overwrites a hand-written file or a
-        symlink outside the store, so apply-config.sh's working-tree link
-        — the dev loop — wins.
+        Keep ~/.config/herdr/config.toml a symlink to the generated config
+        (the curated defaults merged with `settings`, as a store copy).
+        Never overwrites a hand-written file or a symlink outside the
+        store, so apply-config.sh's working-tree link — the dev loop —
+        wins.
       '';
     };
   };
 
   config = lib.mkIf cfg.enable {
+    # The curated config lands as a default on every leaf, so any single
+    # key a host sets through `settings` outranks it and the rest of the
+    # file rides along untouched.
+    services.herdr-drip.plugins.settings = lib.mapAttrsRecursive (_: lib.mkDefault) curatedSettings;
+
     # yolo-shell is the config's PATH-resolved default_shell; bun is
     # worktree-graph's [[build]] and pane command. python3 is deliberately
     # ABSENT: its only consumer is the claude agent-state hook, and
