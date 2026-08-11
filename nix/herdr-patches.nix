@@ -113,5 +113,38 @@ herdrPkg.overrideAttrs (old: {
     # and this spot appears once.
     substituteInPlace src/ui/sidebar.rs \
       --replace-fail '    let detail_content_area = Rect::new(' '    drip_render_accounts_collapsed(app, frame, drip_accounts_rect(area, detail_area, 1), &drip_account_dots(&drip_accounts_lines())); let detail_content_area = Rect::new('
+
+    # last-close-quits: closing the last pane stops the server, instead of
+    # leaving an empty herdr running. Stock herdr treats "no workspaces left"
+    # as a state to sit in — the sidebar empties and the server keeps its
+    # session, its sockets and, crucially, its OLD BINARY. That makes the
+    # obvious reload gesture impossible: a rebuild reaches the UI only after
+    # the server restarts, and nothing short of `herdr server stop` from
+    # another terminal restarts it. With this, closing your way out of herdr
+    # is the reload — the next `herdr` is a new server on the new binary.
+    #
+    # There is no plugin surface for it. `[[events]]` cannot extend or veto a
+    # close, and the decision is a field on AppState that the API only ever
+    # sets from `server stop` (Method::ServerStop -> state.should_quit).
+    # Setting that same field gives the identical shutdown: the headless loop
+    # sees should_quit, sends ServerShutdown to every client, removes the
+    # sockets and exits, so the terminal is restored like any clean quit.
+    #
+    # Two anchors, because herdr empties the workspace list two ways and
+    # "closed the last shell" means both:
+    #   - close_selected_workspace — the close pane/tab/workspace commands,
+    #     which all funnel here once the close takes the workspace with it.
+    #   - handle_pane_died — the pane's process exiting on its own (Ctrl-D,
+    #     `exit`, the agent quitting), which removes the workspace inline
+    #     rather than calling the above.
+    # Both anchors sit INSIDE that function's `if self.workspaces.is_empty()`
+    # arm, so nothing fires while a single pane is left anywhere, and neither
+    # can fire on a server that has not opened a workspace yet — the arms run
+    # on a close, not on an empty list.
+    substituteInPlace src/app/actions.rs \
+      --replace-fail '            self.workspace_scroll = 0;' '            self.workspace_scroll = 0; self.should_quit = true;'
+
+    substituteInPlace src/app/actions.rs \
+      --replace-fail '                if self.mode == Mode::Terminal {' '                self.should_quit = true; if self.mode == Mode::Terminal {'
   '';
 })

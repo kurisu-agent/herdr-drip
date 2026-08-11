@@ -335,6 +335,8 @@ same way the plugin directories curate everything else. Current set:
   the renderer — those functions are what the click hit-testing and the scroll
   metrics ask where the agent panel is, so carving anywhere else would look
   right and mis-route every click on the rail.
+- **last-close-quits** — closing the last pane stops the server, so closing
+  your way out of herdr is how you reload it. See below.
 
 They apply as one function, so every host gets the identical set:
 
@@ -356,7 +358,40 @@ real plugin); and when herdr grows a surface for it, graduate it into a
 plugin directory.
 
 Note the running herdr server keeps its old binary across a rebuild — the
-patch (like any herdr bump) appears after the server restarts.
+patch (like any herdr bump) appears after the server restarts, which is what
+`last-close-quits` below makes a gesture rather than a chore.
+
+### last-close-quits: closing the last pane is the reload
+
+Close panes until none are left and herdr goes away entirely — client and
+server. The next `herdr` is a new server, so it is running the binary you just
+rebuilt.
+
+- **Stock herdr sits in the empty state.** With the last workspace gone the
+  sidebar empties and the server stays up, holding its session, its sockets
+  and its old binary. Nothing short of `herdr server stop` from another
+  terminal ends it, so a rebuilt herdr never reaches the screen.
+- **It fires on both ways out.** The close pane/tab/workspace commands
+  (`Ctrl+b x` and friends) and the pane's process simply exiting — `exit`,
+  Ctrl+D, the agent quitting — are two different code paths in herdr, and both
+  count as closing the last shell.
+- **It is the same shutdown `server stop` performs.** The patch sets the same
+  `should_quit` that the API method sets, so clients get `ServerShutdown`, the
+  sockets are removed, and every terminal is restored the way a clean quit
+  restores it.
+- **Detach is unaffected** — `Ctrl+b d` still leaves the server running with
+  everything in it. Detaching is how you keep a session; closing is how you
+  end one. This patch only makes the second one mean what it says.
+- **It cannot fire while a pane is left**, and it cannot fire on a server that
+  has not opened a workspace yet: both anchors sit inside a close, not inside
+  a check for an empty list.
+- **The next launch is clean, not empty.** herdr saves no snapshot for an
+  empty workspace list — it clears the session file instead — and seeds a
+  workspace from the startup cwd when it finds none, so the new server opens
+  one pane wherever you ran it rather than restoring the nothing you left.
+
+The obvious caveat: your session is gone, because you closed it. Panes you
+want back should be detached from, not closed.
 
 ## Adding a plugin
 
