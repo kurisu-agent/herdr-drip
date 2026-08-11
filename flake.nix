@@ -46,7 +46,14 @@
       # what herdr has no plugin surface for. One function so every consumer
       # applies the identical set; see nix/herdr-patches.nix for the rules
       # (fail-loudly, one story per patch, never apply twice).
-      lib.patchHerdr = import ./nix/herdr-patches.nix;
+      #
+      # `rev` is bound HERE rather than by the caller, so `patchHerdr` stays
+      # the one-argument function every consumer already applies
+      # (nix-claude-drip's herdr knob, drift-rust's guest tools) and the
+      # sidebar's version line still names the drip that patched it. Same
+      # source as the plugin pin below, and the same dirty-checkout story: no
+      # rev, no hash in the header.
+      lib.patchHerdr = import ./nix/herdr-patches.nix { rev = self.rev or null; };
 
       nixosModules = rec {
         # For NixOS hosts running nix-claude-drip (services.claude-code):

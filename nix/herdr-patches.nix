@@ -10,6 +10,10 @@
 #   - One function over the herdr package, so every consumer (the
 #     nix-claude-drip herdr knob, a host pinning its own herdr build)
 #     applies the identical set: `herdr-drip.lib.patchHerdr herdrPkg`.
+#     The `rev` argument is NOT part of that contract — flake.nix applies it
+#     ahead of time (`import ./nix/herdr-patches.nix { rev = self.rev or null; }`),
+#     so what consumers hold stays the same one-argument function it was.
+#     Anything importing this file directly supplies its own rev, or none.
 #   - Every patch FAILS LOUDLY when upstream moves: `substituteInPlace
 #     --replace-fail` (or a context patch) errors the build rather than
 #     silently no-opping, so a herdr bump can never shed a patch without
@@ -21,15 +25,45 @@
 #     --replace-fail no longer matches) — a host overriding
 #     `services.claude-code.herdr.package` supplies an UNPATCHED build and
 #     lets the module patch it.
+{
+  rev ? null,
+}:
 herdrPkg:
+let
+  # The drip's own commit, for the sidebar-version patch below. Six chars is
+  # what the user asked for and plenty to name a commit in a repo this size;
+  # `self.rev` is a full 40, and `self.shortRev` is 7, so neither is usable
+  # as-is. Rendered with a LEADING space so the empty case concatenates to
+  # exactly the old string rather than a trailing one.
+  #
+  # No rev means a dirty checkout — the same condition nix/plugins.nix warns
+  # about and skips its installs for. Here it degrades quietly instead: a
+  # working tree has no commit to name, and a build failure (or the word
+  # "dirty" in the chrome of every dev shell) would be a poor trade for
+  # information the developer already has. The header just reads " herdr
+  # 0.8.0", as it did before this patch learned about revs.
+  dripRev = if rev == null then "" else " " + builtins.substring 0 6 rev;
+in
 herdrPkg.overrideAttrs (old: {
   postPatch = (old.postPatch or "") + ''
     # sidebar-version: the sidebar's workspace-list header hardcodes the
     # label " spaces" — pure redundancy over a list that is visibly spaces.
     # Herdr has no plugin surface for sidebar chrome, so render the running
     # herdr version there instead, which the UI otherwise shows nowhere.
+    #
+    # The drip's rev rides along, because the herdr version alone does not
+    # identify what is on screen: the patches below can change the sidebar
+    # while CARGO_PKG_VERSION sits still at 0.8.0, and then "which build is
+    # this?" has no answer anywhere in the UI. Two words, one line:
+    # `herdr 0.8.0 85c510`.
+    #
+    # It stays a `concat!` of literals, so the whole label is still resolved
+    # at COMPILE time and the anchor keeps its shape — the rev arrives as a
+    # nix interpolation into the replacement text, not as a runtime lookup.
+    # The row is a 1-line Paragraph at the sidebar's full width (26 by
+    # default), so it truncates rather than wraps; 19 columns leaves room.
     substituteInPlace src/ui/sidebar.rs \
-      --replace-fail '" spaces",' 'concat!(" herdr ", env!("CARGO_PKG_VERSION")),'
+      --replace-fail '" spaces",' 'concat!(" herdr ", env!("CARGO_PKG_VERSION"), "${dripRev}"),'
 
     # sidebar-accounts: a rail under the agent list showing each Anthropic
     # account's headroom and reset — how much time is left, per account, where
