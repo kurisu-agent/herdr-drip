@@ -264,6 +264,7 @@ Under the agent list, one rail per Anthropic account: a traffic-light dot, the
 ```
 ──────────────────────
  accounts
+
 ▸● hext2   ▰▰▱▱▱  11m
         7d ▰▰▰▰▱   5d
  ● hext3   ▱▱▱▱▱ 3h31
@@ -272,11 +273,12 @@ Under the agent list, one rail per Anthropic account: a traffic-light dot, the
 ```
 
 `▸` marks where the next session lands. Each row is coloured by its OWN window,
-so a green hour above a red week reads as two facts; the dot takes the worse of
-the two, because one dot cannot say "roomy hour, spent week" and only the
-pessimistic answer is safe to start a session on. Collapse the sidebar and the
-rail collapses with it, to a numbered dot per account in the same three columns
-the agents use.
+so a green hour above a red week reads as two facts — while the **dot** takes
+the worst of the account's rows, so a walled 5h or 7d turns it red even when
+the meter beside it is green and honest. One dot cannot say "roomy hour, spent
+week", and of the two answers only the pessimistic one is safe to start a
+session on. Collapse the sidebar and the rail collapses with it, to a numbered
+dot per account in the same three columns the agents use.
 
 Three pieces, deliberately:
 

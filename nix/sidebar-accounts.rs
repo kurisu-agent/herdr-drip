@@ -24,6 +24,11 @@ const DRIP_AGENT_PANEL_FLOOR: u16 = AGENT_PANEL_HEADER_ROWS + 2;
 /// of them visible before the accounts get any space at all.
 const DRIP_COLLAPSED_AGENT_FLOOR: u16 = 2;
 
+/// Rows above the first account: the separator, the `accounts` title, and a
+/// blank line under it so the title reads as a title rather than as the first
+/// entry of the list.
+const DRIP_HEADER_ROWS: u16 = 3;
+
 /// A file older than this is treated as absent. A watcher that was killed
 /// leaves its last frame on disk, and hour-old headroom presented as current is
 /// worse than no headroom at all: it is the number you would act on.
@@ -182,8 +187,10 @@ pub(crate) fn drip_accounts_split(detail: Rect, lines: &[DripAccountLine]) -> (R
     if lines.is_empty() || detail.width == 0 {
         return (detail, Rect::default());
     }
-    // A separator and a header, then the rows.
-    let wanted = lines.len() as u16 + 2;
+    // A separator, a header, a blank line, then the rows. The blank is not
+    // decoration: without it the first account's row reads as part of the
+    // header, the same way the agent list gets one.
+    let wanted = lines.len() as u16 + DRIP_HEADER_ROWS;
     let rows = wanted.min(detail.height.saturating_sub(DRIP_AGENT_PANEL_FLOOR));
     if rows < 3 {
         return (detail, Rect::default());
@@ -205,7 +212,7 @@ pub(crate) fn drip_render_accounts(
     area: Rect,
     lines: &[DripAccountLine],
 ) {
-    if area.width == 0 || area.height < 3 {
+    if area.width == 0 || area.height <= DRIP_HEADER_ROWS {
         return;
     }
     let p = &app.palette;
@@ -224,14 +231,50 @@ pub(crate) fn drip_render_accounts(
         Rect::new(area.x, area.y + 1, area.width, 1),
     );
 
-    let body = Rect::new(area.x, area.y + 2, area.width, area.height - 2);
+    let body = Rect::new(
+        area.x,
+        area.y + DRIP_HEADER_ROWS,
+        area.width,
+        area.height - DRIP_HEADER_ROWS,
+    );
+    // The marker and dot opening an account are painted with the ACCOUNT's
+    // grade -- the worst of its rows -- while the rest of the row keeps its own
+    // window's. That is the whole point of the two colours: a walled 7d makes
+    // the dot red even though the 5h meter beside it is green and honest.
+    let dots = drip_account_dots(lines);
+    let mut account = 0usize;
     for (index, line) in lines.iter().take(body.height as usize).enumerate() {
+        let line_style = Style::default().fg(drip_severity_color(line.severity, p));
+        let row = Rect::new(body.x, body.y + index as u16, body.width, 1);
+        if !line.opens_account {
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    truncate_end(&line.text, body.width as usize),
+                    line_style,
+                )),
+                row,
+            );
+            continue;
+        }
+
+        let severity = dots.get(account).copied().unwrap_or(line.severity);
+        account += 1;
+        // The first two columns are the marker and the dot; everything after
+        // them is this row's own reading.
+        let head: String = line.text.chars().take(2).collect();
+        let rest: String = line.text.chars().skip(2).collect();
         frame.render_widget(
-            Paragraph::new(Span::styled(
-                truncate_end(&line.text, body.width as usize),
-                Style::default().fg(drip_severity_color(line.severity, p)),
-            )),
-            Rect::new(body.x, body.y + index as u16, body.width, 1),
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    head,
+                    Style::default().fg(drip_severity_color(severity, p)),
+                ),
+                Span::styled(
+                    truncate_end(&rest, body.width.saturating_sub(2) as usize),
+                    line_style,
+                ),
+            ])),
+            row,
         );
     }
 }
@@ -379,7 +422,8 @@ mod drip_accounts_tests {
         assert!(tall.0.height >= DRIP_AGENT_PANEL_FLOOR);
         // Whatever the split, the two halves tile the area they came from.
         assert_eq!(tall.0.height + tall.1.height, 40);
-        assert_eq!(tall.1.height, lines.len() as u16 + 2);
+        // Separator, title, blank, then one row per line.
+        assert_eq!(tall.1.height, lines.len() as u16 + DRIP_HEADER_ROWS);
 
         // Too short to give the rail three rows without starving the agents:
         // the agent panel keeps the whole area and the rail draws nothing.
