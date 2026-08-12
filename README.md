@@ -58,8 +58,25 @@ into the repo, so future config edits are tracked here.
 The config is path-free: keybindings reach the plugins through
 `herdr plugin action invoke`, and `default_shell` is a PATH-resolved
 `yolo-shell`. `apply-config.sh` links `scripts/yolo-shell` into
-`~/.local/bin` unless something already provides it — nix users can take it
-from the flake instead:
+`~/.local/bin` unless something already provides it.
+
+**On NixOS, use the module instead — not a profile install.** The module
+(below) puts `yolo-shell` on the system PATH, and `apply-config.sh` refuses to
+run on a host where it is already active.
+
+> **Never `nix profile add …#yolo-shell` on a module-managed host.** The herdr
+> server's PATH orders `~/.nix-profile/bin` **ahead of**
+> `/run/current-system/sw/bin`, so an imperatively installed `yolo-shell` wins
+> — and it stays pinned to the rev it was installed from. When that pinned
+> copy is older than the flake, every new pane and split runs whatever
+> `yolo-shell` used to be. On triforce-dev (2026-08-12) that was a stub
+> calling `claude --dangerously-skip-permissions` directly, so panes launched
+> an **unrouted** claude: no gumbo account pool, no per-launch session id.
+> `nixos-rebuild` neither reads nor writes the imperative profile, so this
+> survived a rebuild *and* a reboot. Diagnose with
+> `nix profile list | grep yolo`; fix with `nix profile remove yolo-shell`.
+
+For a non-NixOS host with no other source of it, the flake still packages one:
 
 ```
 nix profile add github:kurisu-agent/herdr-drip#yolo-shell

@@ -24,9 +24,15 @@ claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"], ["$wo
 [terminal]
 # New panes boot straight into a yolo claude; exit drops to zsh. The name is
 # resolved against the herdr SERVER's PATH (no ~ expansion), so it must live
-# somewhere the server sees: `nix profile add .#yolo-shell` covers nix
-# boxes; apply-config.sh also links it into ~/.local/bin for shells that
-# launch herdr with a normal user PATH.
+# somewhere the server sees: on NixOS the drip's module puts it on the SYSTEM
+# path, and apply-config.sh links it into ~/.local/bin for shells that launch
+# herdr with a normal user PATH.
+#
+# Deliberately NOT `nix profile add .#yolo-shell` any more. ~/.nix-profile/bin
+# comes BEFORE /run/current-system/sw/bin on the server's PATH, so a profile
+# copy shadows the module's and stays frozen at its install rev through every
+# rebuild — which is how triforce-dev spent 2026-08-12 launching an unrouted
+# claude in every pane. See the warning in README.md.
 default_shell = "yolo-shell"
 
 [keys]
