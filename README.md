@@ -167,12 +167,38 @@ services.herdr-drip.plugins.enable = true;
 ```
 
 Either way, on every rebuild and boot the plugins module keeps each drip
-plugin installed **pinned to the herdr-drip rev the consumer locked**
+plugin registered **from the herdr-drip revision the consumer locked**
 (bumping the input bumps the plugins), keeps `~/.config/herdr/config.toml`
 a symlink to the drip's config (curated defaults + your overrides, below),
 and puts `yolo-shell` + `bun` on the system PATH the herdr server resolves
 against. `python3` stays off the PATH — the claude-agent-state module below
 injects it scoped to the one hook that needs it.
+
+**Nothing is fetched at activation.** Each plugin is a store path built from
+the flake source, published at `/etc/herdr-drip/plugins/<name>` and registered
+with `herdr plugin link` — so the module provisions a host that has never run
+herdr and has no route to GitHub, the herdr server does not have to be up, and
+a dirty checkout works exactly like a clean one. The one manifest `[[build]]`
+in the drip (worktree-graph's `bun install`) is a fixed-output derivation,
+`nix/worktree-graph-deps.nix`; when `bun.lock` moves, rebuild it and paste the
+hash nix reports:
+
+```
+nix build github:kurisu-agent/herdr-drip#worktree-graph-node-modules
+```
+
+Plugins from outside this repo can ride the same mechanism — store path,
+published under `/etc`, linked, never fetched:
+
+```nix
+services.herdr-drip.plugins.extraPlugins.my-plugin = {
+  id = "acme.my-plugin";              # stated, not read: see the option docs
+  path = inputs.acme-plugins + "/my-plugin";
+};
+```
+
+and `services.herdr-drip.plugins.plugins = [ ]` provisions none of the drip's
+own, leaving you to `herdr plugin install` whatever you like by hand.
 
 Every curated setting is a **default, not a mandate**: the managed config is
 generated from `services.herdr-drip.plugins.settings` (freeform TOML as Nix
@@ -193,14 +219,62 @@ generated file is comment-free; the commentary lives in the tracked
 non-nix hosts (where overriding means editing your linked checkout).
 
 It never touches: plugins linked from a working tree (`herdr plugin link`
-wins — that is the dev loop), third-party plugins, a plugin's
-enabled/disabled state (except that a rev bump reinstalls in place, which
-re-enables), or a config.toml that is a plain file or a symlink outside the
-store (`apply-config.sh`'s link into a checkout stays). `link-all.sh` and
-`apply-config.sh` remain the working-tree dev loop this module defers to.
+wins — that is the dev loop, recognised by the plugin root being a mutable
+path rather than a store one), plugins not named in `plugins`, or a
+config.toml symlinked outside the store (`apply-config.sh`'s link into a
+checkout stays). `link-all.sh` and `apply-config.sh` remain the working-tree
+dev loop this module defers to.
+
+It **does** take over a config.toml that is a plain file, keeping the old one
+as `config.toml.bak`. That is deliberate and it is the one destructive-looking
+thing here: herdr writes that file itself — finishing onboarding stamps
+`onboarding = false` into it, as do the theme and sound pickers — so on any
+host where herdr ran before this module first did, the file already exists and
+a hands-off module would never apply the curated config at all, with nothing
+to show for it but a line on activation's stderr. Set
+`services.herdr-drip.plugins.adoptConfig = false` for the old hands-off
+behaviour, or `manageConfig = false` to leave the file alone entirely.
 
 `herdr-drip.nixosModules.default` is both halves — this module plus the
 claude-agent-state module below.
+
+### Where everything lands
+
+Every path the two modules read, write, or publish. `~/.config/herdr` is
+whatever `$XDG_CONFIG_HOME/herdr` resolves to, and `~/.local/state` likewise
+`$XDG_STATE_HOME` — herdr honours both.
+
+Written by nix, owned by the system:
+
+| Path | What |
+| --- | --- |
+| `/etc/herdr-drip/plugins/<name>` | Symlink to each provisioned plugin's store path. Also what keeps those paths from being garbage-collected out from under a running herdr — nothing else in the system closure refers to them. |
+| `/run/current-system/sw/bin/yolo-shell` | `default_shell`, resolved off the herdr **server's** PATH. |
+| `/run/current-system/sw/bin/bun` | worktree-graph's pane command. |
+| `herdr-drip-plugins-<user>.service` | Per-user oneshot backstop, for hosts with no systemd user manager. Same script as the user activation script `herdrDripPlugins`. |
+| `herdr-drip-claude-agent-state-<user>.service` | The same, for the claude-agent-state module (`herdrClaudeAgentState`). |
+
+Written by the modules, per user:
+
+| Path | What |
+| --- | --- |
+| `~/.config/herdr/config.toml` | Symlink to the generated config in the store. |
+| `~/.config/herdr/config.toml.bak` | Whatever was there before adoption. Timestamp-suffixed if a `.bak` already exists — never overwritten. |
+| `~/.config/herdr/plugins.json` | herdr's plugin registry. The module adds/updates one entry per provisioned plugin (as `link`s) and reads it to recognise what it must not touch. |
+| `~/.config/herdr/plugins/github/<id>-<hash>/` | herdr's fetched checkouts. The module creates none of these any more, and **deletes** one only when replacing a registration it can prove was its own (`kurisu-agent/herdr-drip`, under this directory). A third-party checkout is never removed. |
+| `~/.claude/settings.json` | claude-agent-state's `hooks.SessionStart` entry, declared through nix-claude-drip so its rewrites carry it. |
+| `~/.claude/hooks/herdr-agent-state.sh` | Installed by `herdr integration install claude`, re-run on activation when herdr reports it missing or outdated. |
+
+Written by herdr and the drip's own runtime pieces — the modules do not manage
+these, but this is where a plugin's state actually is:
+
+| Path | What |
+| --- | --- |
+| `~/.config/herdr/plugins/config/<plugin-id>/` | Per-plugin config dir (`$HERDR_PLUGIN_CONFIG_DIR`, `herdr plugin config-dir <id>`). |
+| `~/.local/state/herdr/plugins/<plugin-id>/` | Per-plugin state dir (`$HERDR_PLUGIN_STATE_DIR`). This is why a read-only store path works as a plugin root: nothing writes into the plugin directory itself. |
+| `~/.local/state/herdr-drip/sidebar-accounts.txt` | What gumbo-usage writes and the sidebar-accounts patch reads — the only thing connecting them. Override with `$HERDR_DRIP_ACCOUNTS_FILE`. |
+| `~/.local/state/herdr-drip/panes/<session>/<pane-id>` | yolo-shell's record of whether a pane is running the agent or a plain shell, so session restore puts back what was there. |
+| `~/.config/herdr/{herdr.sock,*.log,session*.json,.plugins.lock}` | herdr's own. Never touched. |
 
 ### NixOS + nix-claude-drip: keeping the claude integration alive
 

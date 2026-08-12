@@ -1,37 +1,56 @@
-# plugins — the whole drip, provisioned declaratively.
+# plugins — the whole drip, provisioned declaratively, without a network.
 #
 # By hand, a host is set up per user with `herdr plugin install
 # kurisu-agent/herdr-drip/<dir>` for each plugin, `scripts/apply-config.sh`
 # for the config, and a `nix profile add .#herdr-drip-deps` for the
-# runtime deps. This module is that procedure as NixOS config:
+# runtime deps. This module is that procedure as NixOS config — except that
+# the install is not a fetch:
 #
-#   - keeps each of `plugins` installed, PINNED to `ref` — the flake's
-#     `nixosModules.plugins` defaults `ref` to the flake's own rev, so the
-#     consumer's flake input decides exactly which plugin code runs and a
-#     `nix flake update herdr-drip` moves it;
-#   - keeps ~/.config/herdr/config.toml a symlink to a GENERATED config,
-#     unless the user has taken it over: the curated config/herdr.toml
-#     layered under the host's `settings` overrides, key by key — the
-#     curated values are defaults, not mandates;
+#   - every plugin in `plugins` is a STORE PATH (nix/drip-plugins.nix),
+#     published at /etc/herdr-drip/plugins/<name> and registered with
+#     `herdr plugin link`. The flake input decides which plugin code runs, so
+#     `nix flake update herdr-drip` still moves it, but activation reaches
+#     GitHub exactly never;
+#   - keeps ~/.config/herdr/config.toml a symlink to a GENERATED config:
+#     the curated config/herdr.toml layered under the host's `settings`
+#     overrides, key by key — the curated values are defaults, not mandates;
 #   - puts the runtime deps on the system PATH: yolo-shell (the config's
-#     PATH-resolved default_shell) and bun (worktree-graph's [[build]] and
-#     pane command). Commands resolve against the herdr SERVER's PATH, and
+#     PATH-resolved default_shell) and bun (worktree-graph's pane command).
+#     Commands resolve against the herdr SERVER's PATH, and
 #     /run/current-system/sw/bin is on it even for a server already running
 #     at switch time, so this lands without a restart.
 #
-# The dev loop always wins: a `herdr plugin link`ed working tree
-# (source.kind = "local") is left alone silently, and a config.toml
-# symlinked anywhere outside /nix/store (apply-config.sh's link into a
-# checkout) is left alone with a note. Third-party plugins and plugins not
-# named in `plugins` are never touched.
+# Why link and not install. `herdr plugin install` fetches a tarball, runs
+# the manifest's [[build]], and needs both the network and a working server.
+# Every one of those is a way for a rebuild to produce a different result on
+# a different day, and the first two are things nix does better: the plugin
+# source is already in the store as part of this flake, and the one [[build]]
+# in the drip (worktree-graph's `bun install`) is nix/worktree-graph-deps.nix.
+# What is left is `herdr plugin link`, which is pure registry bookkeeping —
+# no fetch, no build, and it works with the server DOWN, because the CLI
+# falls back to writing plugins.json itself (offline_plugin_link_response).
+# So this module now provisions a host that has never run herdr and has no
+# route to github, and a dirty checkout (which has no rev to pin to) works
+# exactly like a clean one.
+#
+# Why /etc as well as the store path. Nothing else in the system closure
+# refers to these store paths, so without an /etc entry the nix GC is free to
+# collect a plugin that a running herdr still points at — a broken pane, not a
+# warning. The indirection does NOT make the registry stable, though: herdr
+# canonicalizes what it is given (manifest.rs, load_plugin_manifest calls
+# .canonicalize()), so plugins.json records the resolved store path and every
+# content change is a relink. That is why the check below compares against the
+# RESOLVED path, and why a store path is the signature of one of our own
+# links.
+#
+# The dev loop always wins: a `herdr plugin link`ed working tree is left alone
+# silently (that is any local entry whose root is not one of ours), and a
+# config.toml symlinked outside /nix/store (apply-config.sh's link into a
+# checkout) is left alone with a note.
 #
 # Known limitations, by design:
 #   - removing a name from `plugins` does not uninstall it;
-#   - a rev bump reinstalls in place, which re-ENABLES a drip plugin the
-#     user had `herdr plugin disable`d (verified: install-over-existing
-#     replaces and resets enabled);
-#   - `ref = null` (a dirty flake has no rev) skips installs with a
-#     warning; config and deps are still managed.
+#   - relinking re-ENABLES a drip plugin the user had `herdr plugin disable`d.
 #
 # Unlike claude-agent-state.nix this module needs nothing from
 # nix-claude-drip — it only defaults `users` to claude-code's list when
@@ -46,15 +65,36 @@
 let
   cfg = config.services.herdr-drip.plugins;
 
-  # Install addresses a plugin by repo subdir (`flip-split`); list and
-  # uninstall address it by manifest id (`drip.flip-split`). Resolve the id
-  # from each manifest at EVAL time, so a typo in `plugins` fails the build
-  # here rather than failing at activation on every host, and the id stays
-  # authoritative if the drip.<dir> convention ever changes.
-  pluginList = map (name: {
+  dripPlugins = import ./drip-plugins.nix pkgs;
+
+  # Where the published plugin directories live. Also the marker this module
+  # reads back out of the registry to tell its own links from a developer's.
+  etcSubdir = "herdr-drip/plugins";
+  etcRoot = "/etc/${etcSubdir}";
+
+  # Install addressed a plugin by repo subdir (`flip-split`); the registry
+  # addresses it by manifest id (`drip.flip-split`). Resolve the id from each
+  # manifest at EVAL time, so a typo in `plugins` fails the build here rather
+  # than failing at activation on every host, and the id stays authoritative
+  # if the drip.<dir> convention ever changes.
+  repoPlugins = map (name: {
     inherit name;
     id = (builtins.fromTOML (builtins.readFile (../. + "/${name}/herdr-plugin.toml"))).id;
+    package = dripPlugins.mkPlugin name;
   }) cfg.plugins;
+
+  # `extraPlugins` states its ids rather than reading them, because the whole
+  # point of that option is plugins this repo does not contain: reading the
+  # manifest out of a derivation would make every evaluation of this module
+  # build it first (import-from-derivation), which is exactly the kind of
+  # thing a fleet's evaluator is usually configured to refuse.
+  extraPluginList = lib.mapAttrsToList (name: plugin: {
+    inherit name;
+    inherit (plugin) id;
+    package = plugin.path;
+  }) cfg.extraPlugins;
+
+  pluginList = repoPlugins ++ extraPluginList;
 
   settingsFormat = pkgs.formats.toml { };
 
@@ -87,16 +127,13 @@ let
 
   ensurePlugins = pkgs.writeShellScript "herdr-drip-plugins" ''
     set -eu
-    # bun and git are for `herdr plugin install`: the fetch runs in the CLI
-    # process, and so may a manifest's [[build]] (worktree-graph's
-    # `bun install`). Both are scoped to this script; the SERVER gets its
-    # bun from systemPackages below.
+    # Just coreutils and jq now. The fetch that needed git, and the [[build]]
+    # that needed bun, both happen at nix build time; the SERVER still gets
+    # its bun from systemPackages below, for worktree-graph's pane command.
     export PATH=${
       lib.makeBinPath [
         pkgs.coreutils
         pkgs.jq
-        pkgs.bun
-        pkgs.git
       ]
     }:/run/wrappers/bin:/run/current-system/sw/bin:$HOME/.nix-profile/bin:/etc/profiles/per-user/$(id -un)/bin''${PATH:+:$PATH}
 
@@ -106,10 +143,16 @@ let
 
     ${lib.optionalString cfg.manageConfig ''
       # ---- config.toml ------------------------------------------------------
-      # Managed only while it is ours to manage: a fresh host gets the link, a
-      # stale store link is retargeted, and anything the user did on purpose —
-      # apply-config.sh's link into a checkout, a hand-written file — is left
-      # standing with a note.
+      # The generated config is authoritative. herdr writes to this file itself
+      # (completing onboarding stamps `onboarding = false` through a plain
+      # fs::write, as do the theme and sound pickers), so on any host where
+      # herdr ran before this module first did, config.toml already exists as a
+      # regular file. Leaving it alone means the curated config never lands and
+      # the only evidence is a line on activation's stderr — so it is adopted,
+      # with the displaced file kept next to it.
+      #
+      # A symlink pointing outside the store is the developer's own
+      # (apply-config.sh links this file into a checkout) and is never touched.
       target="$HOME/.config/herdr/config.toml"
       expected=${configFile}
       if [ -L "$target" ]; then
@@ -121,12 +164,25 @@ let
               changed=1
               ;;
             *)
-              echo "herdr-drip: config.toml -> $dest (not store-managed); leaving it" >&2
+              echo "herdr-drip: config.toml -> $dest (not store-managed); leaving it. The curated config is NOT in effect for $(id -un) on this host." >&2
               ;;
           esac
         fi
       elif [ -e "$target" ]; then
-        echo "herdr-drip: config.toml is a plain file; leaving it (scripts/apply-config.sh adopts it into a checkout, or remove it for the managed copy)" >&2
+      ${
+        if cfg.adoptConfig then
+          ''
+            backup="$target.bak"
+              if [ -e "$backup" ]; then
+                backup="$target.bak.$(date +%Y%m%d%H%M%S)"
+              fi
+              mv "$target" "$backup"
+              ln -s "$expected" "$target"
+              changed=1
+              echo "herdr-drip: adopted config.toml (herdr had written its own); previous contents kept at $backup" >&2''
+        else
+          ''echo "herdr-drip: config.toml is a plain file and adoptConfig is off; leaving it. The curated config is NOT in effect for $(id -un) on this host." >&2''
+      }
       else
         mkdir -p "$(dirname "$target")"
         ln -s "$expected" "$target"
@@ -135,51 +191,74 @@ let
     ''}
 
     # ---- plugins ------------------------------------------------------------
-    ref=${lib.escapeShellArg (toString cfg.ref)}
-
+    # Linking is idempotent and cheap, so the only reason to read the registry
+    # first is to recognise the two entries that must NOT be overwritten: a
+    # developer's linked working tree, and (for the message) somebody else's
+    # build of one of our ids.
     ensure_plugin() {
-      local subdir=$1 id=$2 entry kind owner repo rev
+      local name=$1 id=$2 root=$3 entry kind current resolved owner repo managed
       entry="$(printf '%s' "$plugins_json" | jq -c --arg id "$id" \
         '[.result.plugins[] | select(.plugin_id == $id)] | first // empty')"
+      # What herdr will actually record for this link, which is not the path
+      # we hand it: it canonicalizes, so ${etcRoot}/<name> lands in the
+      # registry as the store path behind it.
+      resolved="$(readlink -f "$root" 2>/dev/null || printf '%s' "$root")"
+      managed=
       if [ -n "$entry" ]; then
+        current="$(printf '%s' "$entry" | jq -r '.plugin_root // ""')"
+        if [ "$current" = "$resolved" ] || [ "$current" = "$root" ]; then
+          return 0
+        fi
         kind="$(printf '%s' "$entry" | jq -r '.source.kind // ""')"
-        # A linked working tree wins silently — that is the dev loop, and
-        # the link carries newer code than any pin.
         if [ "$kind" = local ]; then
-          return 0
-        fi
-        owner="$(printf '%s' "$entry" | jq -r '.source.owner // ""')"
-        repo="$(printf '%s' "$entry" | jq -r '.source.repo // ""')"
-        if [ "$kind" != github ] || [ "$owner/$repo" != "kurisu-agent/herdr-drip" ]; then
-          echo "herdr-drip: $id is installed from $kind:$owner/$repo, not this drip; leaving it" >&2
-          return 0
-        fi
-        rev="$(printf '%s' "$entry" | jq -r '.source.resolved_commit // ""')"
-        if [ "$rev" = "$ref" ]; then
-          return 0
+          # A linked working tree wins silently — that is the dev loop, and
+          # the link carries newer code than any pin. Our own links are local
+          # too, so what tells them apart is that ours are always in the
+          # store: a mutable path is somebody's checkout, a store path is a
+          # previous generation of this module's work.
+          case "$current" in
+            /nix/store/*) : ;;
+            *) return 0 ;;
+          esac
+        elif [ "$kind" = github ]; then
+          owner="$(printf '%s' "$entry" | jq -r '.source.owner // ""')"
+          repo="$(printf '%s' "$entry" | jq -r '.source.repo // ""')"
+          if [ "$owner/$repo" = kurisu-agent/herdr-drip ]; then
+            # Our own previous work: a fetched checkout from back when this
+            # module installed over the network. Collect it below, once the
+            # link that replaces it has actually succeeded.
+            managed="$(printf '%s' "$entry" | jq -r '.source.managed_path // ""')"
+          else
+            echo "herdr-drip: $id was installed from $kind:$owner/$repo; replacing that registration with this drip's copy (its files are left on disk)" >&2
+          fi
         fi
       fi
-      # Absent and out-of-date are one path: install replaces an existing
-      # same-id install in place. Guarded per plugin — one dead fetch must
-      # not stop the rest; the next activation retries.
-      if "$herdr" plugin install "kurisu-agent/herdr-drip/$subdir" --ref "$ref" -y; then
+      if "$herdr" plugin link "$root" >/dev/null; then
         changed=1
+        case "$managed" in
+          "$HOME"/.config/herdr/plugins/github/*)
+            # Scoped hard: non-empty, ours, and under the directory herdr
+            # keeps fetched checkouts in. Anything else is left standing.
+            rm -rf "$managed"
+            ;;
+        esac
       else
-        echo "herdr-drip: install of $subdir at $ref failed; will retry next activation" >&2
+        echo "herdr-drip: linking $name from $root failed; will retry next activation" >&2
       fi
     }
 
-    if [ -n "$ref" ]; then
-      plugins_json="$("$herdr" plugin list --json 2>/dev/null)" || plugins_json=
-      if [ -n "$plugins_json" ] && printf '%s' "$plugins_json" | jq -e '.result.plugins' >/dev/null 2>&1; then
-        ${lib.concatMapStrings (
-          p: "    ensure_plugin ${lib.escapeShellArg p.name} ${lib.escapeShellArg p.id}\n"
-        ) pluginList}
-      else
-        echo "herdr-drip: 'herdr plugin list --json' unavailable (server down?); plugins left as-is" >&2
-      fi
+    plugins_json="$("$herdr" plugin list --json 2>/dev/null)" || plugins_json=
+    if [ -n "$plugins_json" ] && printf '%s' "$plugins_json" | jq -e '.result.plugins' >/dev/null 2>&1; then
+    ${lib.concatStringsSep "\n  " (
+      map (
+        p:
+        "ensure_plugin ${lib.escapeShellArg p.name} ${lib.escapeShellArg p.id} ${lib.escapeShellArg "${etcRoot}/${p.name}"}"
+      ) pluginList
+    )}
     else
-      echo "herdr-drip: no rev to pin plugin installs to (dirty flake?); skipping installs" >&2
+      # `plugin list` has an offline path of its own, so this is not the
+      # server being down — it is a registry that cannot be read at all.
+      echo "herdr-drip: could not read the plugin registry; plugins left as-is" >&2
     fi
 
     if [ -n "$changed" ]; then
@@ -202,22 +281,53 @@ in
         "worktree-tokens"
       ];
       description = ''
-        Top-level plugin directories of this repo to keep installed
+        Top-level plugin directories of this repo to keep linked
         (`hello`, the template, is deliberately not in the default).
-        Removing a name does NOT uninstall it — the module never touches
-        plugins outside this list.
+        Removing a name does NOT unlink it — the module never touches
+        plugins outside this list. Set to `[ ]` to provision none of them
+        and leave the user to `herdr plugin install` whatever they want.
       '';
     };
 
-    ref = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
+    extraPlugins = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            id = lib.mkOption {
+              type = lib.types.str;
+              example = "acme.thing";
+              description = ''
+                The plugin's manifest id. Stated rather than read out of the
+                manifest, so that evaluating this module never has to build
+                `path` first (import-from-derivation).
+              '';
+            };
+            path = lib.mkOption {
+              type = lib.types.either lib.types.path lib.types.package;
+              description = ''
+                Directory holding the plugin's `herdr-plugin.toml`. Published
+                at /etc/${etcSubdir}/<name> and linked from there, so it is
+                subject to the same rules as the drip's own: read-only, no
+                [[build]] step is ever run, and anything the manifest needs
+                built must already be in it.
+              '';
+            };
+          };
+        }
+      );
+      default = { };
+      example = lib.literalExpression ''
+        {
+          my-plugin = {
+            id = "acme.my-plugin";
+            path = inputs.acme-plugins + "/my-plugin";
+          };
+        }
+      '';
       description = ''
-        Git rev plugin installs are pinned to. The flake's
-        `nixosModules.plugins` defaults this to the flake's own rev, so
-        bumping the flake input bumps the installed plugins with it. null
-        (a dirty checkout has no rev) skips installs with a warning;
-        config and deps are still managed.
+        Plugins from outside this repo, provisioned the same way the drip's
+        own are — declaratively, from the store, with no fetch at activation.
+        The attribute name is the directory name under /etc/${etcSubdir}.
       '';
     };
 
@@ -225,7 +335,7 @@ in
       type = lib.types.nullOr lib.types.package;
       default = null;
       description = ''
-        herdr package whose CLI installs the plugins. null resolves
+        herdr package whose CLI links the plugins. null resolves
         `herdr` from the running user's PATH at activation time (system
         profile, ~/.nix-profile, per-user profile) and warns instead of
         failing when absent — right for fleets where herdr arrives
@@ -256,13 +366,24 @@ in
         }
       '';
       description = ''
-        herdr config (config.toml) as Nix values. The drip's curated
-        config/herdr.toml sits underneath as leaf-level defaults, so a key
-        set here overrides just that key and every other curated setting
-        stays. Lists are leaves — overriding e.g. `keys.command` replaces
-        the whole list, not one entry. `lib.mkForce` a subtree to drop the
-        curated contents of it entirely. Only consulted while
-        `manageConfig` is true.
+        herdr config (config.toml) as Nix values. With `curatedDefaults`
+        on, the drip's curated config/herdr.toml sits underneath as
+        leaf-level defaults, so a key set here overrides just that key and
+        every other curated setting stays. Lists are leaves — overriding
+        e.g. `keys.command` replaces the whole list, not one entry.
+        `lib.mkForce` a subtree to drop the curated contents of it
+        entirely. Only consulted while `manageConfig` is true.
+      '';
+    };
+
+    curatedDefaults = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Layer the drip's curated config/herdr.toml under `settings` as
+        defaults. Off, `settings` is the whole config and this module
+        provisions nothing it was not told: use it on a host that wants the
+        plugins and the deps but has its own opinions about herdr's config.
       '';
     };
 
@@ -272,9 +393,21 @@ in
       description = ''
         Keep ~/.config/herdr/config.toml a symlink to the generated config
         (the curated defaults merged with `settings`, as a store copy).
-        Never overwrites a hand-written file or a symlink outside the
-        store, so apply-config.sh's working-tree link — the dev loop —
-        wins.
+        Never overwrites a symlink pointing outside the store, so
+        apply-config.sh's working-tree link — the dev loop — wins.
+      '';
+    };
+
+    adoptConfig = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Take over a plain-file ~/.config/herdr/config.toml, keeping what was
+        there as `config.toml.bak`. herdr creates and writes that file itself
+        (onboarding, the theme and sound pickers), so without this the
+        generated config never lands on a host where herdr ran first — which
+        looks exactly like the module not working. Off, such a file is left
+        alone and the mismatch is reported on stderr instead.
       '';
     };
   };
@@ -283,36 +416,42 @@ in
     # The curated config lands as a default on every leaf, so any single
     # key a host sets through `settings` outranks it and the rest of the
     # file rides along untouched.
-    services.herdr-drip.plugins.settings = lib.mapAttrsRecursive (_: lib.mkDefault) curatedSettings;
+    services.herdr-drip.plugins.settings = lib.mkIf cfg.curatedDefaults (
+      lib.mapAttrsRecursive (_: lib.mkDefault) curatedSettings
+    );
+
+    # The published plugin directories. This is also what keeps them alive:
+    # the registry holds paths, not store references, so without an entry in
+    # the system closure the GC would be free to collect a plugin that a
+    # running herdr still points at.
+    environment.etc = lib.listToAttrs (
+      map (p: lib.nameValuePair "${etcSubdir}/${p.name}" { source = p.package; }) pluginList
+    );
 
     # yolo-shell is the config's PATH-resolved default_shell; bun is
-    # worktree-graph's [[build]] and pane command. python3 is deliberately
-    # ABSENT: its only consumer is the claude agent-state hook, and
-    # claude-agent-state.nix injects a store python3 scoped to that one
-    # command — putting it here would widen every interactive PATH for
-    # nothing.
+    # worktree-graph's pane command. python3 is deliberately ABSENT: its only
+    # consumer is the claude agent-state hook, and claude-agent-state.nix
+    # injects a store python3 scoped to that one command — putting it here
+    # would widen every interactive PATH for nothing.
     environment.systemPackages = [
       yoloShell
       pkgs.bun
     ];
 
-    # Network access happens at activation only when a plugin is missing or
-    # out of date — the same class of side effect as claude-agent-state
-    # re-running `herdr integration install`.
+    # No network access at activation any more: this reads a registry and
+    # writes symlinks. It stays an activation script rather than something
+    # ordered after the network because there is nothing left to wait for.
     system.userActivationScripts.herdrDripPlugins = "${ensurePlugins}";
 
     # Mirror of the settings-installer backstop: user activation never fires
     # on hosts with no systemd user manager, so cover the named users from a
-    # per-user SYSTEM oneshot too. Ordering after network-online is
-    # best-effort — a failed fetch warns and the next activation retries.
+    # per-user SYSTEM oneshot too.
     systemd.services = lib.listToAttrs (
       map (
         u:
         lib.nameValuePair "herdr-drip-plugins-${u}" {
           description = "herdr-drip: provision drip plugins + config for ${u}";
           wantedBy = [ "multi-user.target" ];
-          wants = [ "network-online.target" ];
-          after = [ "network-online.target" ];
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;

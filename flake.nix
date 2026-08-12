@@ -24,6 +24,12 @@
           # builds the same thing from the host's nixpkgs.
           yolo-shell = import ./nix/yolo-shell.nix pkgs;
 
+          # worktree-graph's `bun install`, as a fixed-output derivation. Built
+          # here so the hash can be bumped without a NixOS host in the loop:
+          # `nix build .#worktree-graph-node-modules` prints what to paste into
+          # nix/worktree-graph-deps.nix when bun.lock moves.
+          worktree-graph-node-modules = import ./nix/worktree-graph-deps.nix pkgs;
+
           # Everything the drip needs at runtime, resolved against the herdr
           # SERVER's PATH, in one profile add: yolo-shell (default_shell),
           # bun (worktree-graph's [[build]] and pane command), python3 (the
@@ -40,6 +46,11 @@
 
           default = yolo-shell;
         }
+        # Each plugin directory as the store path the NixOS module publishes
+        # and links (`nix build .#plugin-worktree-graph` to inspect one).
+        // (nixpkgs.lib.mapAttrs' (
+          name: nixpkgs.lib.nameValuePair "plugin-${name}"
+        ) (import ./nix/drip-plugins.nix pkgs).all)
       );
 
       # Hardcore plugins — the drip's source patches on herdr itself, for
@@ -62,15 +73,13 @@
         # boot. See nix/claude-agent-state.nix.
         claude-agent-state = import ./nix/claude-agent-state.nix;
 
-        # Declarative installs of the drip's plugins + curated config +
-        # runtime deps (see nix/plugins.nix). The wrapper pins installs to
-        # this flake's own rev, so a consumer bumping the flake input moves
-        # the installed plugins with it; a dirty checkout has no rev and the
-        # module warns instead of installing something unpinned.
-        plugins = {
-          imports = [ ./nix/plugins.nix ];
-          services.herdr-drip.plugins.ref = nixpkgs.lib.mkDefault (self.rev or null);
-        };
+        # Declarative provisioning of the drip's plugins + curated config +
+        # runtime deps (see nix/plugins.nix). The plugins are store paths
+        # built from THIS flake's source and registered with `herdr plugin
+        # link`, so the consumer's flake input decides exactly which plugin
+        # code runs and `nix flake update herdr-drip` moves it — with no rev
+        # to pin, no fetch at activation, and no dirty-checkout special case.
+        plugins = import ./nix/plugins.nix;
 
         # The standard procedure: both halves.
         default = {
