@@ -1,8 +1,10 @@
 #!/usr/bin/env zsh
-# herdr's default_shell: every new interactive pane starts claude in yolo mode,
-# and exiting claude lands in a normal shell instead of closing the pane. A
-# session restore puts each pane back the way it was -- agent panes resumed,
-# shell panes still shells.
+# herdr's default_shell: an interactive pane starts claude in yolo mode, and
+# exiting claude lands in a normal shell instead of closing the pane. A pane
+# herdr spawned as a plain terminal (HERDR_DRIP_PANE_KIND=shell, set by the
+# drip's herdr patches for new workspaces, new tabs and the pane menu's
+# `(shell)` splits) skips the agent entirely. A session restore puts each pane
+# back the way it was -- agent panes resumed, shell panes still shells.
 #
 # "yolo mode" is whatever $YOLO_SHELL_LAUNCHER names; with it unset, the `yolo`
 # COMMAND when one is on PATH (e.g. a gumbo multi-account gateway launcher that
@@ -66,6 +68,31 @@ mark() {
   [[ -n $state_file ]] && print -r -- $1 >| $state_file 2>/dev/null
   return 0
 }
+
+# A pane herdr spawned as a terminal rather than an agent. The drip's herdr
+# patches set this in the pane's launch env for every new workspace, every new
+# tab, every worktree it opens, and the pane menu's two `(shell)` splits --
+# the gestures that mean "somewhere to work", as opposed to a split, which is
+# how you ask for another agent. Deciding here rather than in the patch is the
+# point: herdr sets one variable and knows nothing about what a shell is, so
+# the same patched herdr on a host with an ordinary default_shell inherits one
+# unused variable and behaves as stock.
+#
+# Taken BEFORE the stdin peek below, not folded into its condition: the peek
+# spends 0.5s waiting for a resume line that cannot arrive here, since herdr
+# only injects one for a pane that had an agent session and this pane was born
+# a moment ago. That wait would land on every new workspace.
+#
+# It is a spawn-time flag with no life after this: herdr persists no launch
+# env, so a restored pane arrives without it. `mark shell` is what carries the
+# fact across a server restart -- the same record that remembers a pane you
+# dropped out of claude by hand. Unset so the pane's own environment does not
+# hand a herdr-internal marker to everything the user runs in it.
+if [[ ${HERDR_DRIP_PANE_KIND:-} == shell ]]; then
+  mark shell
+  unset HERDR_DRIP_PANE_KIND
+  exec zsh -i
+fi
 
 # On session restore herdr assumes default_shell is a plain shell and injects
 # the pane's agent command (`claude --resume <id>`) as terminal input right

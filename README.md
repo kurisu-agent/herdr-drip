@@ -140,6 +140,26 @@ pruned after 30 days; every restore rewrites the ones still alive.
 Records only exist for panes started by a `yolo-shell` that has this, so panes
 already open when you adopt it come back as claude once, then record themselves.
 
+### Panes that were born shells
+
+A pane herdr spawned with `HERDR_DRIP_PANE_KIND=shell` in its launch env skips
+claude entirely and lands in your interactive shell. That is what the
+**shell-panes** hardcore patch sets on new workspaces, new tabs, worktrees it
+opens and the pane menu's `(shell)` splits — the drip's herdr sets one
+variable, and everything that knows what a shell is lives here.
+
+It is read before the stdin peek above, not folded into it: that peek spends
+half a second waiting for a resume line which cannot arrive for a pane created
+a moment ago (herdr injects one only for a pane that *had* an agent session),
+and half a second on every new workspace is a tax for nothing. The variable is
+then unset, so the pane's own environment does not hand a herdr-internal
+marker to everything you run in it, and the pane records itself as a shell —
+which is what brings it back as one after a restore, since herdr persists no
+launch env.
+
+Nothing here is required: with no such variable set, yolo-shell behaves
+exactly as it always did.
+
 Caveat: `default_shell` (and every other bare command in the config and
 plugin manifests) is resolved against the herdr **server's** PATH, not your
 shell's — and a server launched by systemd or nix usually has no
@@ -455,6 +475,14 @@ same way the plugin directories curate everything else. Current set:
   right and mis-route every click on the rail.
 - **last-close-quits** — closing the last pane stops the server, so closing
   your way out of herdr is how you reload it. See below.
+- **shell-panes** — a new workspace or tab opens a terminal, not an agent.
+  Splitting is what asks for claude. See below.
+- **shell-splits** — `Split right (shell)` and `Split down (shell)` beside the
+  pane menu's existing two, so the split can be either answer. A plugin's
+  `[[actions]]` reach the palette and the keybindings, never herdr's context
+  menus, whose items are a `&'static str` list compiled into the binary.
+- **pane-menu-trim** — three items off that same menu: `Rename pane`,
+  `Clear pane name` and `Send right-clicks to pane`. See below.
 
 They apply as one function, so every host gets the identical set:
 
@@ -474,6 +502,21 @@ breaks the patch **fails the build loudly** instead of silently shedding it;
 give each patch a one-paragraph story (what it changes, why it can't be a
 real plugin); and when herdr grows a surface for it, graduate it into a
 plugin directory.
+
+Loud is not the same as quick, though: the build fails in `postPatch`, which
+is minutes of rust compile away from the mistake that caused it. Run the same
+postPatch alone, against a herdr checkout, in about a second:
+
+```
+./scripts/check-herdr-patches.sh [path-to-herdr-checkout]   # default ~/Code/herdr
+```
+
+It lifts the body out of `nix/herdr-patches.nix` rather than keeping a copy,
+applies it to a throwaway tree, names the first anchor that does not match,
+and prints the patched hunks. Point it at the revision your consumer has
+locked, not just at `main` — an anchor can match a checkout that is ahead of
+the pin and still fail the build that ships. What it does not do is typecheck:
+it says the anchors matched, not that the result compiles.
 
 Note the running herdr server keeps its old binary across a rebuild — the
 patch (like any herdr bump) appears after the server restarts, which is what
@@ -510,6 +553,82 @@ rebuilt.
 
 The obvious caveat: your session is gone, because you closed it. Panes you
 want back should be detached from, not closed.
+
+### shell-panes: a new workspace is a terminal, a split is an agent
+
+`default_shell` is `yolo-shell`, and yolo-shell starts claude — so before this
+patch, every gesture that made a pane made an agent. Clicking `+` for
+somewhere to run `git log` opened a claude session, and on a gumbo host that
+is an account assignment and a prompt cache you did not ask for.
+
+The split is by gesture, not by pane:
+
+| Gesture | What starts |
+| --- | --- |
+| New workspace — the sidebar's `+`, the `new_workspace` key, the name prompt | shell |
+| New tab | shell |
+| `New worktree`, `Open worktree...`, and the workspace herdr seeds at startup | shell |
+| `Split right` / `Split down`, from the pane menu or `Ctrl+b r`/`d` | claude |
+| `Split right (shell)` / `Split down (shell)` (**shell-splits**) | shell |
+| A session restore | whatever that pane was |
+
+Asking for an agent is now a deliberate two-pane gesture, and the shell you
+land in is a normal one — type `yolo` (or `claude`) and you have an agent in
+that pane after all.
+
+**The mechanism is herdr's own, and the patch knows nothing about shells.**
+Every pane-spawning API call already carries a launch env to the new pane
+(`herdr pane split --env`, `workspace create --env`); the patch sets exactly
+one variable on the paths above:
+
+```
+HERDR_DRIP_PANE_KIND=shell
+```
+
+`yolo-shell` reads it and execs your interactive shell instead of the
+launcher. A host whose `default_shell` is a plain shell inherits one unused
+variable and behaves exactly like stock herdr — the same replaceability rule
+`sidebar-accounts` follows.
+
+**The API mostly keeps stock behaviour.** Two of the three anchors are
+herdr's *TUI-side* mutations (`tui.workspace.create`, `tui.tab.create` and
+friends), so a plugin or a `herdr workspace create` still gets an agent, and
+one that wants a shell asks with `--env HERDR_DRIP_PANE_KIND=shell`; an
+explicit `env` from the caller is never overwritten. The exception is opening
+a worktree, which is one code path with no `env` on it at all — so
+`herdr worktree open` gets a shell too, whoever ran it.
+
+**It does not survive a restore, and does not need to.** herdr persists no
+launch env, so a restored pane arrives without the variable — what carries
+"this pane is a terminal" across a server restart is the per-pane record
+yolo-shell already keeps for panes you dropped out of claude by hand (see
+[Panes that were shells come back as shells](#panes-that-were-shells-come-back-as-shells)).
+A shell pane records itself the moment it starts.
+
+The rest of the pane menu is untouched — `Swap with focused pane`, `Zoom` and
+`Close pane` rearrange panes that already exist, and none of them starts
+anything.
+
+### pane-menu-trim: three fewer ways to hit the wrong thing
+
+A context menu is also a list of things you can hit by accident, and these
+three were worth more as removals than as items.
+
+- **`Rename pane` and `Clear pane name`.** A pane's label is the agent's
+  terminal title, which says what that pane is doing *now*; a manual name
+  freezes it at whatever was true when you typed it, and the pane then lies
+  quietly for the rest of the session. Both are still there for anyone who
+  wants them — `herdr pane rename <pane_id> <label>|--clear` — they are just
+  no longer the first item under the pointer.
+- **`Send right-clicks to pane`.** Passthrough means this menu no longer
+  opens on this pane, so the click that turns it on is the click that hides
+  the way back — unless the host has set `ui.right_click_passthrough_modifier`
+  and you remember it.
+
+Only the *set* half goes. That slot reads `Use Herdr right-click menu` while a
+pane is in passthrough, and that half stays: `herdr pane input --right-click
+pane` and `pane split --right-click pane` can still put a pane there, and the
+menu should remain the way out.
 
 ## Adding a plugin
 
