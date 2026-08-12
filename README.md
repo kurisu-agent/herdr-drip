@@ -357,7 +357,21 @@ Under the agent list, one rail per Anthropic account: a traffic-light dot, the
  ○ hext1   inference
 ```
 
-`▸` marks where the next session lands.
+Two markers can appear in the column left of the dot, and they answer different
+questions:
+
+- **`▸` — the pick.** Where gumbo's strategy would put a session started right
+  now. It is a moving target by design: `balance` spreads new sessions by
+  assigned-key count, so opening one session usually moves the marker to
+  another account.
+- **`⚑` — a pin.** `gumbo use <name>` overrides the strategy entirely, so this
+  says both where the next session goes and why. `gumbo use auto` clears it.
+  A pinned account never shows `▸` — the pin outranks it.
+
+Neither marker says where the sessions you already have are running: gumbo
+keeps a session on its account for as long as that account is viable (moving
+one would re-pay its whole prompt cache), so a running session's account is its
+own fact. `gumbo sessions` is what lists those.
 
 Two colours per account row, split at the meter's first cell. The **dot, the
 marker and the name** are the account, so they take the worst of its rows: a
@@ -374,9 +388,11 @@ Three pieces, deliberately:
 
 - **[gumbo](https://github.com/kurisu-agent/gumbo) `watch`** does the reading.
   It caches to `~/.cache/gumbo` and only goes to Anthropic's usage endpoint
-  when that cache has aged out, so the rail redraws every 30s while the
+  when that cache has aged out, so the rail redraws every 5s while the
   endpoint is read every 5 minutes — which matters, because that endpoint's
   rate limit is per IP and losing it blinds every account on the box at once.
+  The two cadences are independent on purpose: the meters change slowly, but
+  `▸` moves the moment a new session is placed, and only the daemon knows.
 - **`drip.gumbo-usage`** (this plugin) runs `gumbo watch --format compact
   --tags --out <file>` from a `[[startup]]` hook and keeps it alive.
 - **the `sidebar-accounts` hardcore patch** reads that one file and draws it.
@@ -394,7 +410,7 @@ Overrides, for a wider sidebar or a different cadence — set them in the herdr
 ```
 HERDR_DRIP_ACCOUNTS_FILE      # default: $XDG_STATE_HOME/herdr-drip/sidebar-accounts.txt
 HERDR_DRIP_ACCOUNTS_WIDTH     # default: 21 (fits herdr's 26-column sidebar)
-HERDR_DRIP_ACCOUNTS_INTERVAL  # default: 30 (seconds between redraws, NOT between polls)
+HERDR_DRIP_ACCOUNTS_INTERVAL  # default: 5 (seconds between redraws, NOT between polls)
 ```
 
 `gumbo` must be on the herdr server's PATH — it is not a dependency of this

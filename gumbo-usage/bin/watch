@@ -15,7 +15,15 @@ out=${HERDR_DRIP_ACCOUNTS_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip
 # ~21 columns is what the sidebar leaves at its default width (26) once the
 # separator and the rail's own margin are taken; `gumbo watch` lays out to fit.
 width=${HERDR_DRIP_ACCOUNTS_WIDTH:-21}
-interval=${HERDR_DRIP_ACCOUNTS_INTERVAL:-30}
+# How often the RAIL is redrawn, which is not how often Anthropic is read --
+# that is gumbo's cache TTL (300s) and nothing here can shorten it. Five
+# seconds because the `▸` marker moves on its own: gumbo spreads new sessions
+# by assigned-key count, so opening one session changes where the next lands,
+# and a marker that redraws twice a minute would be pointing at the previous
+# answer most of the time. A tick costs one unix-socket call to the daemon and
+# a read of its own cache; `gumbo watch`'s own comment calls 60 renders per
+# read the intended shape.
+interval=${HERDR_DRIP_ACCOUNTS_INTERVAL:-5}
 
 if ! command -v gumbo >/dev/null 2>&1; then
   echo "gumbo is not on the herdr server's PATH; the accounts rail stays empty" >&2
