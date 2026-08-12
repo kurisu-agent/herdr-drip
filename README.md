@@ -225,15 +225,26 @@ config.toml symlinked outside the store (`apply-config.sh`'s link into a
 checkout stays). `link-all.sh` and `apply-config.sh` remain the working-tree
 dev loop this module defers to.
 
-It **does** take over a config.toml that is a plain file, keeping the old one
-as `config.toml.bak`. That is deliberate and it is the one destructive-looking
-thing here: herdr writes that file itself — finishing onboarding stamps
-`onboarding = false` into it, as do the theme and sound pickers — so on any
-host where herdr ran before this module first did, the file already exists and
-a hands-off module would never apply the curated config at all, with nothing
-to show for it but a line on activation's stderr. Set
-`services.herdr-drip.plugins.adoptConfig = false` for the old hands-off
-behaviour, or `manageConfig = false` to leave the file alone entirely.
+It **does** take over a config.toml it did not put there, because a deployment
+should run the config its flake pin describes. Two things can be in the way and
+`adoptConfig` decides how far it goes:
+
+- a **plain file** is herdr's own — it writes this file itself, stamping
+  `onboarding = false` when onboarding completes and again from the theme and
+  sound pickers — so on any host where herdr ran before this module first did,
+  the file already exists. It is moved to `config.toml.bak` (timestamped rather
+  than overwriting an existing backup) and replaced.
+- a **symlink outside the store** is `apply-config.sh`'s, pointing into a
+  checkout. Under the default `adoptConfig = "always"` the **link** is
+  replaced; the checkout's file is never followed, written, or removed. This
+  matters more than it looks: a checkout that stops being pulled silently pins
+  that host's herdr to whatever the drip looked like the day someone ran the
+  script, and the only symptom is settings that quietly do not apply.
+
+**On a host the drip is developed on, set `adoptConfig = "plain-file"`** — that
+keeps the linked checkout, which is the dev loop, while still rescuing a host
+from herdr's own file. `"never"` leaves anything that exists alone and reports
+the mismatch on stderr; `manageConfig = false` opts out of the config entirely.
 
 `herdr-drip.nixosModules.default` is both halves — this module plus the
 claude-agent-state module below.

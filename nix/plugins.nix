@@ -143,16 +143,25 @@ let
 
     ${lib.optionalString cfg.manageConfig ''
       # ---- config.toml ------------------------------------------------------
-      # The generated config is authoritative. herdr writes to this file itself
-      # (completing onboarding stamps `onboarding = false` through a plain
-      # fs::write, as do the theme and sound pickers), so on any host where
-      # herdr ran before this module first did, config.toml already exists as a
-      # regular file. Leaving it alone means the curated config never lands and
-      # the only evidence is a line on activation's stderr — so it is adopted,
-      # with the displaced file kept next to it.
+      # The generated config is authoritative, and there are two ways for
+      # something else to be sitting where it goes.
       #
-      # A symlink pointing outside the store is the developer's own
-      # (apply-config.sh links this file into a checkout) and is never touched.
+      # A PLAIN FILE is herdr's own: it writes this file itself — completing
+      # onboarding stamps `onboarding = false` through a plain fs::write, as do
+      # the theme and sound pickers — so on any host where herdr ran before
+      # this module first did, config.toml already exists. Leaving it alone
+      # means the curated config never lands, with nothing to show for it but a
+      # line on activation's stderr.
+      #
+      # A SYMLINK OUTSIDE THE STORE is apply-config.sh's, pointing at a
+      # checkout. That is the dev loop on a box being developed on, and stale
+      # cruft everywhere else — a checkout that stops being pulled silently
+      # pins herdr to whatever the drip looked like the day someone ran that
+      # script. Adopting it replaces the LINK only; the file in the checkout is
+      # never followed, written, or removed.
+      #
+      # `adoptConfig` picks how far that goes; "always" is the default because
+      # a deployment should run the config its flake pin describes.
       target="$HOME/.config/herdr/config.toml"
       expected=${configFile}
       if [ -L "$target" ]; then
@@ -163,6 +172,13 @@ let
               ln -sfn "$expected" "$target"
               changed=1
               ;;
+            ${lib.optionalString (cfg.adoptConfig == "always") ''
+              *)
+                ln -sfn "$expected" "$target"
+                changed=1
+                echo "herdr-drip: adopted config.toml (it pointed at $dest, which is left untouched)" >&2
+                ;;
+            ''}
             *)
               echo "herdr-drip: config.toml -> $dest (not store-managed); leaving it. The curated config is NOT in effect for $(id -un) on this host." >&2
               ;;
@@ -170,7 +186,9 @@ let
         fi
       elif [ -e "$target" ]; then
       ${
-        if cfg.adoptConfig then
+        if cfg.adoptConfig == "never" then
+          ''echo "herdr-drip: config.toml is a plain file and adoptConfig = \"never\"; leaving it. The curated config is NOT in effect for $(id -un) on this host." >&2''
+        else
           ''
             backup="$target.bak"
               if [ -e "$backup" ]; then
@@ -180,8 +198,6 @@ let
               ln -s "$expected" "$target"
               changed=1
               echo "herdr-drip: adopted config.toml (herdr had written its own); previous contents kept at $backup" >&2''
-        else
-          ''echo "herdr-drip: config.toml is a plain file and adoptConfig is off; leaving it. The curated config is NOT in effect for $(id -un) on this host." >&2''
       }
       else
         mkdir -p "$(dirname "$target")"
@@ -399,15 +415,34 @@ in
     };
 
     adoptConfig = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
+      type = lib.types.enum [
+        "always"
+        "plain-file"
+        "never"
+      ];
+      default = "always";
+      example = "plain-file";
       description = ''
-        Take over a plain-file ~/.config/herdr/config.toml, keeping what was
-        there as `config.toml.bak`. herdr creates and writes that file itself
-        (onboarding, the theme and sound pickers), so without this the
-        generated config never lands on a host where herdr ran first — which
-        looks exactly like the module not working. Off, such a file is left
-        alone and the mismatch is reported on stderr instead.
+        How far to go in taking over a `~/.config/herdr/config.toml` this
+        module did not put there.
+
+        `always` (the default) also replaces a symlink pointing outside the
+        store — `apply-config.sh`'s link into a checkout. Only the link is
+        replaced: the checkout's file is never followed, written, or removed.
+        This is what a deployment wants, because a checkout that stops being
+        pulled pins herdr to whatever the drip looked like the day someone ran
+        that script, and nothing says so.
+
+        `plain-file` adopts only a regular file (herdr writes one itself
+        during onboarding, and from the theme and sound pickers) and leaves a
+        linked checkout alone. **This is the setting for a host the drip is
+        developed on**, where that link is the dev loop.
+
+        `never` leaves anything that already exists alone and reports the
+        mismatch on stderr.
+
+        A displaced regular file is always kept as `config.toml.bak`
+        (timestamp-suffixed rather than overwriting an existing one).
       '';
     };
   };
