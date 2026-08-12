@@ -10,9 +10,14 @@
 //
 // The file's format is one line per row: `<severity><kind> <text>`, where
 // severity is g/y/r/- (green, yellow, red, unknown) and kind is `a` for a line
-// that opens an account or `c` for one that continues it. That is gumbo's
-// `--tags` contract, and it is deliberately dumb: the writer owns all the
-// layout, so changing how the rail LOOKS never means rebuilding herdr.
+// that opens an account or `c` for one that continues it. A tag with no text
+// after it is an empty row -- the blank gumbo writes between accounts. That is
+// gumbo's `--tags` contract, and it is deliberately dumb: the writer owns all
+// the layout, so changing how the rail LOOKS never means rebuilding herdr.
+//
+// The one thing this side does know about the layout is where an account's
+// identity stops and its numbers start (`DRIP_HEAD_COLUMNS`), because the two
+// are painted in different colours and only one of them is the account's.
 // ---------------------------------------------------------------------------
 
 /// Rows the agent panel keeps for itself. It renders nothing at all below three
@@ -130,11 +135,22 @@ fn drip_read_accounts() -> Vec<DripAccountLine> {
 /// `<severity><kind> <text>` -> a row. Anything else is dropped: a half-written
 /// frame cannot reach here (the writer renames a temp into place) but a file
 /// someone edited by hand can, and a rail is not worth a panic.
+///
+/// The separating space belongs to the text, so a tag with nothing after it is
+/// a legal EMPTY row -- that is the blank line gumbo writes between accounts.
+/// Requiring the space would make the spacer depend on a trailing blank
+/// surviving every editor and hook the file passes through, which is not a
+/// thing to bet the rail's spacing on.
 fn drip_parse_line(line: &str) -> Option<DripAccountLine> {
     let mut chars = line.chars();
     let severity = chars.next()?;
     let kind = chars.next()?;
-    if chars.next() != Some(' ') || !matches!(severity, 'g' | 'y' | 'r' | '-') {
+    match chars.next() {
+        None => {}
+        Some(' ') => {}
+        Some(_) => return None,
+    }
+    if !matches!(severity, 'g' | 'y' | 'r' | '-') {
         return None;
     }
     Some(DripAccountLine {
@@ -159,19 +175,17 @@ fn drip_severity_color(severity: char, p: &Palette) -> ratatui::style::Color {
     }
 }
 
-/// Where the meter starts in a row, in characters — the boundary between what
-/// names the account and what measures this row.
+/// Characters at the front of a row that identify the ACCOUNT rather than
+/// measure this window: the marker and the dot, plus the space after them.
 ///
-/// Found by looking for the meter's own cells rather than by counting columns,
-/// because the writer owns the layout: gumbo sizes the name column to whatever
-/// width it was given, and `▰`/`▱` are the one thing in a row that can only be
-/// a meter. A row with no meter at all (an inference-only account, a note) has
-/// no boundary, and the whole row reads as identity.
-fn drip_meter_column(text: &str) -> usize {
-    text.chars()
-        .position(|c| c == '▰' || c == '▱')
-        .unwrap_or_else(|| text.chars().count())
-}
+/// A constant, matching gumbo's `COMPACT_HEAD`. It used to be found by scanning
+/// for the first `▰`/`▱`, because the name column was sized from the rail's
+/// width and the meter was the only fixed landmark in a row. The name is gone
+/// and every column ahead of the meter is fixed now, so the boundary is a
+/// number both sides can state — and scanning would put it in the wrong place
+/// anyway, since what follows the head is this row's own percent, which must
+/// not be painted with the account's grade.
+const DRIP_HEAD_COLUMNS: usize = 3;
 
 /// One severity per ACCOUNT: the worst grade from each opening row up to the
 /// next one. A single dot cannot say "roomy hour, spent week", and of the two
@@ -196,6 +210,35 @@ pub(crate) fn drip_account_dots(lines: &[DripAccountLine]) -> Vec<char> {
     dots
 }
 
+/// How many of `lines` to draw in `height` rows.
+///
+/// All of them when they fit. When they do not, the cut lands on an account
+/// boundary rather than wherever the row count ran out: half an account is two
+/// numbers with nothing saying which window either belongs to, and the second
+/// row of a pair is the one that carries the week. Trailing blanks go with it,
+/// so a truncated rail never ends on the spacer that was meant to separate the
+/// account it just dropped.
+///
+/// Zero is a legitimate answer -- a rail with room for one and a half accounts
+/// shows one, and a rail with room for less than one shows none and gives the
+/// space back to the agents.
+fn drip_fit(lines: &[DripAccountLine], height: usize) -> usize {
+    if height >= lines.len() {
+        return lines.len();
+    }
+    // Back up to the nearest place a group begins. That is an opening row, or
+    // the blank in front of one -- cutting on the blank keeps the account above
+    // it whole, which is a row better than cutting on the opener would do.
+    let mut end = height;
+    while end > 0 && !lines[end].opens_account && !lines[end].text.trim().is_empty() {
+        end -= 1;
+    }
+    while end > 0 && lines[end - 1].text.trim().is_empty() {
+        end -= 1;
+    }
+    end
+}
+
 /// Carve the accounts rail off the bottom of the agent panel's area.
 ///
 /// Returns `(agent_area, accounts_area)`, the second empty whenever the rail
@@ -216,11 +259,21 @@ pub(crate) fn drip_accounts_split(detail: Rect, lines: &[DripAccountLine]) -> (R
     // gets one. The blank BELOW is carved here but never drawn -- the rail's
     // rect stops short of it (`drip_accounts_rect`'s `reserved`), so it is
     // taken from the agent panel exactly once rather than eating an account.
-    let wanted = lines.len() as u16 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS;
-    let rows = wanted.min(detail.height.saturating_sub(DRIP_AGENT_PANEL_FLOOR));
-    if rows < DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS {
+    //
+    // What is left after the agents' floor and this chrome is the rows the
+    // accounts may have, and [`drip_fit`] decides how many of them are worth
+    // showing. Asking it here rather than clamping to the raw count is what
+    // keeps the carve and the draw agreeing: the rail is exactly as tall as
+    // what will be drawn in it, so a dropped account leaves no empty band.
+    let budget = detail
+        .height
+        .saturating_sub(DRIP_AGENT_PANEL_FLOOR)
+        .saturating_sub(DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS);
+    let shown = drip_fit(lines, budget as usize) as u16;
+    if shown == 0 {
         return (detail, Rect::default());
     }
+    let rows = shown + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS;
     let split = detail.height - rows;
     (
         Rect::new(detail.x, detail.y, detail.width, split),
@@ -269,7 +322,8 @@ pub(crate) fn drip_render_accounts(
     // the dot red even though the 5h meter beside it is green and honest.
     let dots = drip_account_dots(lines);
     let mut account = 0usize;
-    for (index, line) in lines.iter().take(body.height as usize).enumerate() {
+    let shown = drip_fit(lines, body.height as usize);
+    for (index, line) in lines.iter().take(shown).enumerate() {
         let line_style = Style::default().fg(drip_severity_color(line.severity, p));
         let row = Rect::new(body.x, body.y + index as u16, body.width, 1);
         if !line.opens_account {
@@ -285,12 +339,13 @@ pub(crate) fn drip_render_accounts(
 
         let severity = dots.get(account).copied().unwrap_or(line.severity);
         account += 1;
-        // Marker, dot and NAME are the account's identity and take the
-        // account's grade together; the meter and its eta are this row's own
-        // reading and keep their own colour.
-        let split = drip_meter_column(&line.text);
-        let head: String = line.text.chars().take(split).collect();
-        let rest: String = line.text.chars().skip(split).collect();
+        // Marker and dot are the account's identity and take the account's
+        // grade -- the worst of its rows. Everything after them is this row's
+        // own 5h reading, percent included, and keeps its own colour: a green
+        // hour under a spent week must not be painted as though the hour were
+        // the problem.
+        let head: String = line.text.chars().take(DRIP_HEAD_COLUMNS).collect();
+        let rest: String = line.text.chars().skip(DRIP_HEAD_COLUMNS).collect();
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
@@ -298,7 +353,10 @@ pub(crate) fn drip_render_accounts(
                     Style::default().fg(drip_severity_color(severity, p)),
                 ),
                 Span::styled(
-                    truncate_end(&rest, body.width.saturating_sub(2) as usize),
+                    truncate_end(
+                        &rest,
+                        body.width.saturating_sub(DRIP_HEAD_COLUMNS as u16) as usize,
+                    ),
                     line_style,
                 ),
             ])),
@@ -399,13 +457,45 @@ mod drip_accounts_tests {
         drip_parse_line(tagged).expect("parses")
     }
 
+    /// The rail as gumbo writes it: three accounts of two rows each, blanks
+    /// between them. Eight lines, and the blanks are rows like any other.
+    fn rail() -> Vec<DripAccountLine> {
+        [
+            "ga ▸●  46% ▰▰▱▱▱▱ 11m",
+            "rc     96% ▰▰▰▰▰▱ 5d",
+            "-c",
+            "ga  ●   0% ▱▱▱▱▱▱",
+            "gc     44% ▰▰▰▱▱▱ 5d",
+            "-c",
+            "ga  ●  31% ▰▱▱▱▱▱ 43m",
+            "gc      8% ▱▱▱▱▱▱ 6d",
+        ]
+        .into_iter()
+        .map(line)
+        .collect()
+    }
+
     #[test]
     fn a_tagged_line_splits_into_grade_kind_and_text() {
-        let parsed = line("ga ▸● hext2   ▰▰▱▱▱  11m");
+        let parsed = line("ga ▸●  46% ▰▰▱▱▱▱ 11m");
 
         assert_eq!(parsed.severity, 'g');
         assert!(parsed.opens_account);
-        assert_eq!(parsed.text, "▸● hext2   ▰▰▱▱▱  11m");
+        assert_eq!(parsed.text, "▸●  46% ▰▰▱▱▱▱ 11m");
+    }
+
+    #[test]
+    fn a_bare_tag_is_the_blank_row_between_accounts() {
+        // gumbo writes the spacer as a tag with nothing after it, so no line in
+        // the file ends in whitespace and the spacing survives anything that
+        // strips it. It continues the account above rather than opening one.
+        let parsed = line("-c");
+
+        assert_eq!(parsed.text, "");
+        assert!(!parsed.opens_account);
+        // The same row with the separating space still present: the writer
+        // trims it, but a consumer that has to read both cannot afford to care.
+        assert_eq!(line("-c ").text, "");
     }
 
     #[test]
@@ -420,50 +510,70 @@ mod drip_accounts_tests {
 
     #[test]
     fn an_accounts_dot_is_the_worst_of_its_rows() {
-        let lines = vec![
-            line("ga ▸● hext2   ▰▰▱▱▱  11m"),
-            line("rc         7d ▰▰▰▰▱   5d"),
-            line("gc         fb ▰▱▱▱▱     "),
-            line("ga  ● hext3   ▱▱▱▱▱ 3h31"),
-            line("gc         7d ▱▱▱▱▱   6d"),
-        ];
+        let lines = rail();
 
         // A green hour over a red week is a red account: one dot, worst news.
-        assert_eq!(drip_account_dots(&lines), vec!['r', 'g']);
+        // The blanks fold into the account above them and change nothing --
+        // they grade `-`, which ranks below everything.
+        assert_eq!(drip_account_dots(&lines), vec!['r', 'g', 'g']);
     }
 
     #[test]
-    fn the_account_colour_covers_the_name_and_stops_at_the_meter() {
-        // The dot, the marker and the name are one statement about the
-        // account; the meter beside them is a statement about one window.
-        let row = "▸● hext2   ▰▰▱▱▱  11m";
-        let split = drip_meter_column(row);
+    fn the_account_colour_stops_before_the_percent() {
+        // Marker and dot say how the ACCOUNT is doing; everything after them is
+        // this row's own window. The percent is on the wrong side of that line
+        // to take the account's grade -- a green 46% hour under a red week has
+        // to stay green, or the rail says the hour is the problem.
+        let row = "▸●  46% ▰▰▱▱▱▱ 11m";
 
-        assert_eq!(row.chars().take(split).collect::<String>(), "▸● hext2   ");
-        assert_eq!(row.chars().skip(split).collect::<String>(), "▰▰▱▱▱  11m");
-    }
-
-    #[test]
-    fn a_row_with_no_meter_is_all_identity() {
-        // "inference", "DEAD", "no usage": nothing was measured, so there is
-        // no reading to colour differently from the name.
-        let row = " ○ hext1   inference";
-        assert_eq!(drip_meter_column(row), row.chars().count());
+        assert_eq!(
+            row.chars().take(DRIP_HEAD_COLUMNS).collect::<String>(),
+            "▸● "
+        );
+        assert_eq!(
+            row.chars().skip(DRIP_HEAD_COLUMNS).collect::<String>(),
+            " 46% ▰▰▱▱▱▱ 11m"
+        );
     }
 
     #[test]
     fn an_unmeasured_account_keeps_its_own_dot() {
-        let lines = vec![line("-a  ○ hext1   inference")];
+        // No windows, so no percent and no meter: the note sits where they
+        // would, and the head is still the head.
+        let lines = vec![line("-a  ○ inference")];
         assert_eq!(drip_account_dots(&lines), vec!['-']);
+        assert_eq!(
+            lines[0].text.chars().take(DRIP_HEAD_COLUMNS).collect::<String>(),
+            " ○ "
+        );
+    }
+
+    #[test]
+    fn a_short_rail_drops_whole_accounts_and_no_trailing_blank() {
+        let lines = rail();
+
+        // Everything fits: everything is drawn.
+        assert_eq!(drip_fit(&lines, 8), 8);
+        assert_eq!(drip_fit(&lines, 99), 8);
+
+        // One row short of all three. Two accounts survive, and the blank that
+        // was separating them from the third goes with it -- a rail must never
+        // end on the spacer for something it did not draw.
+        assert_eq!(drip_fit(&lines, 7), 5);
+        // Exactly two accounts and their separator: the cut lands on the blank
+        // itself, which keeps the account above it whole.
+        assert_eq!(drip_fit(&lines, 5), 5);
+        // Room for two rows of the second account but not its opener: back off
+        // to the first account alone rather than draw a week with no account.
+        assert_eq!(drip_fit(&lines, 4), 2);
+        // Less than one whole account is nothing at all. Half an account is two
+        // numbers with nothing to say which window either belongs to.
+        assert_eq!(drip_fit(&lines, 1), 0);
     }
 
     #[test]
     fn the_rail_never_starves_the_agent_panel() {
-        // Three accounts, six rows: the agents keep their floor and the rail
-        // takes what is left -- or nothing at all, in a sidebar this short.
-        let lines: Vec<DripAccountLine> = (0..6)
-            .map(|i| line(if i % 2 == 0 { "ga  ● acct  ▱▱▱▱▱  1h" } else { "gc     7d   ▱▱▱▱▱  6d" }))
-            .collect();
+        let lines = rail();
 
         let tall = drip_accounts_split(Rect::new(0, 0, 20, 40), &lines);
         assert!(tall.0.height >= DRIP_AGENT_PANEL_FLOOR);
@@ -475,8 +585,15 @@ mod drip_accounts_tests {
             lines.len() as u16 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS
         );
 
-        // Too short to give the rail three rows without starving the agents:
-        // the agent panel keeps the whole area and the rail draws nothing.
+        // Tight enough that the third account does not fit. The rail asks for
+        // exactly what it will draw -- five rows, not eight -- so the agents
+        // get the difference back instead of the rail keeping an empty band.
+        let tight = drip_accounts_split(Rect::new(0, 0, 20, 15), &lines);
+        assert_eq!(tight.1.height, 5 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS);
+        assert_eq!(tight.0.height + tight.1.height, 15);
+
+        // Too short to give the rail one whole account without starving the
+        // agents: the agent panel keeps the area and the rail draws nothing.
         let short = drip_accounts_split(Rect::new(0, 0, 20, 6), &lines);
         assert_eq!(short.1, Rect::default());
         assert_eq!(short.0, Rect::new(0, 0, 20, 6));

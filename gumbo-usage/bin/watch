@@ -13,7 +13,10 @@ set -uo pipefail
 
 out=${HERDR_DRIP_ACCOUNTS_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip/sidebar-accounts.txt}
 # ~21 columns is what the sidebar leaves at its default width (26) once the
-# separator and the rail's own margin are taken; `gumbo watch` lays out to fit.
+# separator and the rail's own margin are taken. This is a CEILING, not a
+# target: the compact layout is 19 columns wide and stays there, so a wider
+# rail buys air on the right rather than a wider meter. It only matters below
+# 19, where the meter gives up cells to keep the percent and the eta whole.
 width=${HERDR_DRIP_ACCOUNTS_WIDTH:-21}
 # How often the RAIL is redrawn, which is not how often Anthropic is read --
 # that is gumbo's cache TTL (300s) and nothing here can shorten it. Five
