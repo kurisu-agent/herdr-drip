@@ -343,5 +343,48 @@ herdrPkg.overrideAttrs (old: {
 
     substituteInPlace src/ui/panes.rs \
       --replace-fail '    let multi_pane = ws.layout.pane_count() > 1;' '    let multi_pane = true;'
+
+    # rounded-corners: pane frames get zellij's rounded corners (╭ ╮ ╰ ╯)
+    # instead of the square ┌ ┐ └ ┘. Cosmetic, and deliberately only the
+    # corners — the straight runs stay ─ │, so this is the same frame with its
+    # four ends softened.
+    #
+    # herdr's config has no border style at all (`herdr --default-config` has
+    # pane_borders / pane_outer_borders / pane_gaps /
+    # show_agent_labels_on_pane_borders, all booleans), so there is nothing to
+    # set and nothing for a plugin to reach: the glyphs are a `&'static str`
+    # match compiled into the renderer.
+    #
+    # Two sites compose a pane frame, and they compose it differently:
+    #   - The tiled grid does NOT use ratatui's Block. `render_pane_borders`
+    #     accumulates a `LineCell { up, down, left, right }` per screen cell
+    #     across every pane rect and split line, then `line_cell_symbol` picks
+    #     one glyph for the resulting arm set — which is how a shared edge
+    #     between two panes becomes one ├ rather than two overlapping frames.
+    #     So there is no BorderType to set here; the four corner ARMS are
+    #     patched, one line each, and every other arm set is left alone.
+    #   - `render_popup_pane` is a real `Block`, so it takes ratatui's own
+    #     `BorderType::Rounded` (ROUNDED = the same four glyphs). Fully
+    #     qualified because panes.rs imports `Block, Borders, Clear, Paragraph`
+    #     and not BorderType, and adding a `use` would need a second anchor.
+    #
+    # The tees and the cross where splits MEET stay square — ┬ ┴ ├ ┤ ┼ have no
+    # rounded counterpart in Unicode's box-drawing block, and zellij draws them
+    # square for the same reason. Every glyph outside a pane frame (the
+    # sidebar's tree, dialogs, the status bar) is untouched.
+    substituteInPlace src/ui/panes.rs \
+      --replace-fail '(false, true, false, true) => "┌",' '(false, true, false, true) => "╭",'
+
+    substituteInPlace src/ui/panes.rs \
+      --replace-fail '(false, true, true, false) => "┐",' '(false, true, true, false) => "╮",'
+
+    substituteInPlace src/ui/panes.rs \
+      --replace-fail '(true, false, false, true) => "└",' '(true, false, false, true) => "╰",'
+
+    substituteInPlace src/ui/panes.rs \
+      --replace-fail '(true, false, true, false) => "┘",' '(true, false, true, false) => "╯",'
+
+    substituteInPlace src/ui/panes.rs \
+      --replace-fail '.border_style(Style::default().fg(app.palette.accent))' '.border_style(Style::default().fg(app.palette.accent)).border_type(ratatui::widgets::BorderType::Rounded)'
   '';
 })
