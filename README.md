@@ -145,7 +145,7 @@ already open when you adopt it come back as claude once, then record themselves.
 A pane herdr spawned with `HERDR_DRIP_PANE_KIND=shell` in its launch env skips
 claude entirely and lands in your interactive shell. That is what the
 **shell-panes** hardcore patch sets on new workspaces, new tabs, worktrees it
-opens and the pane menu's `(shell)` splits — the drip's herdr sets one
+opens and the pane menu's `Shell` splits — the drip's herdr sets one
 variable, and everything that knows what a shell is lives here.
 
 It is read before the stdin peek above, not folded into it: that peek spends
@@ -477,13 +477,15 @@ same way the plugin directories curate everything else. Current set:
   your way out of herdr is how you reload it. See below.
 - **shell-panes** — a new workspace or tab opens a terminal, not an agent.
   Splitting is what asks for claude. See below.
-- **shell-splits** — four split entries on the pane menu instead of two, a
-  shell and an agent each way, ordered by direction and glyphed. A plugin's
-  `[[actions]]` reach the palette and the keybindings, never herdr's context
-  menus, whose items are a `&'static str` list compiled into the binary. See
-  below.
-- **pane-menu-trim** — three items off that same menu: `Rename pane`,
-  `Clear pane name` and `Send right-clicks to pane`. See below.
+- **pane-menu** — the pane's right-click menu, rewritten: renamed rows in three
+  separated groups, `New Tab` / `New Space` added, a shell and an agent split
+  each way, three rows dropped, and a right-aligned icon column across every
+  context menu. A plugin's `[[actions]]` reach the palette and the keybindings,
+  never herdr's context menus, whose items are a `&'static str` list compiled
+  into the binary. See below.
+- **single-pane-borders** — a lone pane keeps its frame. Not the
+  `ui.pane_borders` setting, which is already on: herdr ANDs it with a
+  hardcoded `pane_count() > 1`. See below.
 
 They apply as one function, so every host gets the identical set:
 
@@ -569,8 +571,8 @@ The split is by gesture, not by pane:
 | New workspace — the sidebar's `+`, the `new_workspace` key, the name prompt | shell |
 | New tab | shell |
 | `New worktree`, `Open worktree...`, and the workspace herdr seeds at startup | shell |
-| `Split right (agent)` / `Split down (agent)`, and `Ctrl+b r`/`d` | claude |
-| `Split right (shell)` / `Split down (shell)` (**shell-splits**) | shell |
+| `Agent Right` / `Agent Down`, and `Ctrl+b r`/`d` | claude |
+| `Shell Right` / `Shell Down` (**pane-menu**) | shell |
 | A session restore | whatever that pane was |
 
 Asking for an agent is now a deliberate two-pane gesture, and the shell you
@@ -606,77 +608,123 @@ yolo-shell already keeps for panes you dropped out of claude by hand (see
 [Panes that were shells come back as shells](#panes-that-were-shells-come-back-as-shells)).
 A shell pane records itself the moment it starts.
 
-The rest of the pane menu is untouched — `Swap with focused pane`, `Zoom` and
-`Close pane` rearrange panes that already exist, and none of them starts
-anything.
+Nothing else on the pane menu starts anything: `Swap with focused pane`, `Zoom`
+and `Close` rearrange panes that already exist. What the menu offers, and what
+each row is called, is **pane-menu** below.
 
-### shell-splits: four rows, ordered by direction
-
-Both answers, each way, grouped under the direction rather than under the kind:
+### pane-menu: the whole menu, renamed and reordered
 
 ```
- Swap with focused pane
-   Split right (shell)
-   Split right (agent)
-   Split down (shell)
-   Split down (agent)
- Zoom
- Close pane
+ New Tab             
+ New Space           
+ ────────────────────
+ Zoom                
+ ────────────────────
+ Agent Right         
+ Agent Down          
+ Shell Right         
+ Shell Down          
+ ────────────────────
+ Close               
 ```
 
-You pick the direction first — that is the part you can see in the layout in
-front of you — so the two rows you are then choosing between sit adjacent
-instead of two apart. And `Split right` no longer means "an agent" by
-omission: with **shell-panes** upstream, a split is the only gesture that
-starts claude, so the row that does it says so.
+Three groups: what makes something new, what rearranges what is already there,
+and the four ways to split. `Split right`/`Split down` are gone as names —
+with **shell-panes** upstream, a split is the only gesture that starts claude,
+so the rows that do it say `Agent` and the rows that do not say `Shell`.
 
-The glyphs are all Codicons, from the `U+EA60`–`U+EBEB` block every Nerd Font
-since v2.3 carries — one family, so the four rows share a weight, and off the
-Material Design plane (`U+F0000`+) whose codepoints moved wholesale between
-Nerd Fonts v2 and v3:
+**`New Tab` and `New Space` are not on herdr's pane menu at all.** They live on
+the tab and sidebar menus, which is a trip to the sidebar for the two things
+you most often want next to the pane you are looking at. Both reuse herdr's own
+entry points, so they inherit its name prompts (`prompt_new_workspace_name` and
+the tab-name dialog) and, through **shell-panes**, open shells rather than
+agents.
 
-| Glyph | Codepoint | Name | Means |
+**The icons are right-aligned, which is why the labels no longer carry them.**
+herdr draws each row as `Line::from(item)`, so anything a row wants to say has
+to be *in* its string — and a string cannot know how wide the popup will be.
+`context_menu_rect` sizes that popup from the longest item, so the pad between
+label and glyph is only knowable one frame at a time, in the renderer. Hence a
+row builder (`nix/context-menu-render.rs`) and a vocabulary
+(`nix/context-menu-items.rs`) instead of cleverer labels.
+
+| Glyph | Codepoint | Name | Row |
 | --- | --- | --- | --- |
-|  | `U+EB56` | `cod-split_horizontal` | panes side by side — `right` |
-|  | `U+EB57` | `cod-split_vertical` | panes stacked — `down` |
-|  | `U+EA85` | `cod-terminal` | a shell |
-|  | `U+EB08` | `cod-hubot` | an agent |
+|  | `U+EB23` | `cod-multiple_windows` | `New Tab` (and the tab menu's `New tab`) |
+|  | `U+EB7F` | `cod-window` | `New Space` |
+|  | `U+EB4C` | `cod-screen_full` | `Zoom` |
+|  | `U+EBCB` | `cod-arrow_swap` | `Swap with focused pane` |
+|  | `U+EB56` | `cod-split_horizontal` | `Agent Right`, `Shell Right` |
+|  | `U+EB57` | `cod-split_vertical` | `Agent Down`, `Shell Down` |
+|  | `U+EB94` | `cod-menu` | `Use Herdr right-click menu` |
+|  | `U+EA76` | `cod-close` | `Close`, `Close group` |
+|  | `U+EA73` | `cod-edit` | `Rename` |
+|  | `U+EA80` | `cod-new_folder` | `New worktree` |
+|  | `U+EAF7` | `cod-folder_opened` | `Open worktree...` |
+|  | `U+EA81` | `cod-trash` | `Delete worktree checkout...` |
+|  | `U+EAB4` | `cod-chevron_down` | `Expand` |
+|  | `U+EAB7` | `cod-chevron_up` | `Collapse` |
 
-The words stay rather than letting the glyph carry the whole meaning: a
-terminal whose font lacks the block draws boxes, and every row still reads.
-They say `right`/`down`, not horizontal/vertical, because those two inverted
-somewhere between tmux (`split -h` is side by side) and vim (`:split` is
-stacked) — the glyph is the half that cannot be read backwards.
+All Codicons, from the `U+EA60`–`U+EBEB` block every Nerd Font since v2.3
+carries — one family, so the column shares a weight, and off the Material
+Design plane (`U+F0000`+) whose codepoints moved wholesale between Nerd Fonts
+v2 and v3. The workspace, git-workspace and tab menus are in the table because
+the renderer is shared: an icon column that appears on one menu and not the
+next reads as a bug rather than as a choice. The words carry the meaning on
+their own, so a terminal whose font lacks the block draws boxes and every row
+still reads.
 
-Labels and glyphs are four consts in `nix/pane-menu-labels.rs`, appended to
-herdr's `app::state`, which each read three times over: the item list, the
-match arm that accepts the label, and the comparison that decides shell or
-agent. That direction is forced — `app::state` is `pub mod` and `app::input`
-is private, so the dispatcher can name a const defined in state.rs and not the
-other way round. herdr's own tests drive this menu by item position or by
-`Close pane`, never by a split label, so renaming these four is invisible to
-them.
+**A separator is not a row you can land on.** herdr's items are a flat
+`Vec<&'static str>` with no notion of a rule, so being unselectable takes two
+patches: the hit test refuses a separator (which backs both the click that
+activates a row and the hover that highlights one, so a pointer crossing a rule
+leaves the highlight where it was), and the keyboard steps over it
+(`drip_menu_move`, because `MenuListState` is shared with menus that have no
+separators and cannot see the items).
 
-### pane-menu-trim: three fewer ways to hit the wrong thing
+**`pane-menu-trim` used to be a patch of its own and is now an outcome.**
+`drip_pane_menu` names every row it wants, so `Rename pane`, `Clear pane name`
+and `Send right-clicks to pane` are absent by omission rather than removed by a
+later pass. The reasons stand: a pane's label is the agent's terminal title,
+which says what the pane is doing *now*, and a manual name freezes it at
+whatever was true when you typed it (`herdr pane rename <pane_id>
+<label>|--clear` still does it); and passthrough means this menu no longer
+opens on this pane, so the click that turns it on is the click that hides the
+way back. Only the *set* half went — `Use Herdr right-click menu` is carried
+through whenever herdr offers it, because the CLI can still put a pane in
+passthrough and the menu should remain the way out.
 
-A context menu is also a list of things you can hit by accident, and these
-three were worth more as removals than as items.
+**The conditional rows stay herdr's decision.** `drip_pane_menu` is handed the
+list stock just finished building and maps it to ours, so `Swap with focused
+pane` still appears only mid-swap and the passthrough exit only in passthrough
+— we decide order and wording, herdr decides what is on offer. One anchor, and
+a herdr that grows a new conditional row tells us by dropping it, not by
+mangling the order.
 
-- **`Rename pane` and `Clear pane name`.** A pane's label is the agent's
-  terminal title, which says what that pane is doing *now*; a manual name
-  freezes it at whatever was true when you typed it, and the pane then lies
-  quietly for the rest of the session. Both are still there for anyone who
-  wants them — `herdr pane rename <pane_id> <label>|--clear` — they are just
-  no longer the first item under the pointer.
-- **`Send right-clicks to pane`.** Passthrough means this menu no longer
-  opens on this pane, so the click that turns it on is the click that hides
-  the way back — unless the host has set `ui.right_click_passthrough_modifier`
-  and you remember it.
+One cost, paid knowingly: herdr's own tests find menu rows by position or by
+the string `Close pane`, and that row is now `Close`. The nix build does not
+run them (`doCheck = false`) and neither does `check-herdr-patches.sh`, so
+nothing here catches it — but a `cargo test` on a patched checkout would fail.
 
-Only the *set* half goes. That slot reads `Use Herdr right-click menu` while a
-pane is in passthrough, and that half stays: `herdr pane input --right-click
-pane` and `pane split --right-click pane` can still put a pane there, and the
-menu should remain the way out.
+### single-pane-borders: a lone pane keeps its frame
+
+**This one is not a setting, though it looks like it should be.** `ui.pane_borders`
+and `ui.pane_outer_borders` are both true by default, and herdr ANDs them with
+a hardcoded `pane_count() > 1` — so the only pane in a workspace has no frame
+whatever the config says, and no key turns that off. A plugin cannot reach it
+either: it is the renderer, three expressions deep in `src/ui/panes.rs`. Hence
+a hardcore patch.
+
+The frame is what says which pane has focus and where a pane ends, and a
+workspace that opens with one pane spends its first minutes with neither.
+Splitting in order to get a border is a poor trade.
+
+The flag is patched where it is **defined**, not at its five use sites, so no
+condition is rewritten: everything else `multi_pane` gates is already a no-op
+for a lone pane — `pane_to_right`/`pane_below` find no neighbour, and the gap
+shrink is keyed on having found one. The one use that is not about chrome is
+`should_dim`, which greys *unfocused* panes; with one pane in the layout that
+pane is the focused one, so it cannot fire either.
 
 ## Adding a plugin
 

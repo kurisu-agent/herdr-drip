@@ -2,7 +2,7 @@
 // Appended to src/app/input/modal.rs by nix/herdr-patches.nix, whose two
 // one-line anchors widen the existing "Split right" / "Split down" arms to
 // accept both of that direction's labels and route them here. The labels
-// themselves are in nix/pane-menu-labels.rs, which also fixes their order in
+// themselves are in nix/context-menu-items.rs, which also fixes their order in
 // the menu; the `shell` argument below is just which of the pair was clicked.
 //
 // All this adds over herdr's own `split_focused_pane_via_api` is the launch

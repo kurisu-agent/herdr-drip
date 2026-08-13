@@ -185,70 +185,163 @@ herdrPkg.overrideAttrs (old: {
     substituteInPlace src/app/creation.rs \
       --replace-fail '        self.create_workspace_with_launch_env(initial_cwd, focus, Vec::new())' '        self.create_workspace_with_launch_env(initial_cwd, focus, vec![("HERDR_DRIP_PANE_KIND".to_string(), "shell".to_string())])'
 
-    # shell-splits: four split entries on the pane menu instead of two — a
-    # shell and an agent, each way — for a terminal next to the agent instead
-    # of a second agent. With shell-panes above, splitting is now the ONLY
-    # gesture that starts claude, so the pane menu is where both answers have
-    # to live.
+    # pane-menu: the pane's right-click menu, rewritten — what it offers, in
+    # what order, what each row is called, and an icon column down the right.
     #
-    # No plugin can add them: a plugin's [[actions]] reach the command palette
-    # and keybindings, never herdr's context menus, and the menu's items are a
-    # `&'static str` list compiled into ContextMenuState::items.
+    #     New Tab
+    #     New Space
+    #     ─────────────────────────────────────────
+    #     Zoom
+    #     ─────────────────────────────────────────
+    #     Agent Right
+    #     Agent Down
+    #     Shell Right
+    #     Shell Down
+    #     ─────────────────────────────────────────
+    #     Close
     #
-    # The list is ordered by DIRECTION — right (shell), right (agent), down
-    # (shell), down (agent) — so the two rows you pick between sit adjacent,
-    # and each carries two Codicon glyphs naming the direction and the kind.
-    # Both labels and glyphs live in pane-menu-labels.rs, appended to state.rs
-    # because that is the module the dispatcher can name (see the file). Note
-    # that `Split right` no longer means "an agent" by omission: the agent rows
-    # say so, which is the whole point of shell-panes being upstream of them.
+    # Four things here, and only the first has anywhere else it could live:
     #
-    # The two live arms in apply_context_menu_action_via_api are widened to
-    # accept both of their labels rather than duplicated, so the shell split
-    # keeps the focus and mode handling of the stock one and the only
-    # difference is the launch env. The 16-space indentation is what makes each
-    # anchor unique: the same lines exist at 12 spaces in the #[cfg(test)] copy
-    # of the dispatcher, which keeps matching herdr's own tests — those drive
-    # the menu by item POSITION or by "Close pane", never by a split label, so
-    # renaming these four is invisible to them.
-    cat ${./pane-menu-labels.rs} >> src/app/state.rs
+    #   - THE SPLITS. Stock offers `Split right`/`Split down`, both of which
+    #     start claude, because default_shell is yolo-shell. With shell-panes
+    #     above, a split is now the ONLY gesture that starts an agent, so the
+    #     menu carries both answers and names them: Agent, or Shell. A plugin's
+    #     [[actions]] reach the command palette and the keybindings, never a
+    #     context menu, whose items are a `&'static str` list compiled in.
+    #   - THE CREATIONS. `New Tab` and `New Space` are not on the pane menu at
+    #     all in stock herdr — they live on the tab and sidebar menus, which is
+    #     a trip to the sidebar for the two things you most often want next to
+    #     the pane you are looking at. They reuse herdr's own entry points, so
+    #     they inherit its name prompts and, through shell-panes, open shells.
+    #   - THE SEPARATORS. Three groups: what makes something new, what
+    #     rearranges what exists, and what splits. A separator is an item like
+    #     any other in a `Vec<&'static str>`, so it has to be made
+    #     unselectable in both directions — the keyboard skips it
+    #     (`drip_menu_move`) and the hit test refuses it (below).
+    #   - THE ICON COLUMN, right-aligned. This is the reason the labels stopped
+    #     carrying their own glyphs: the pad between label and icon depends on
+    #     the popup's width, which is computed per frame from the longest item,
+    #     so only the renderer can know it. See context-menu-render.rs.
+    #
+    # `pane-menu-trim` used to be a separate patch that retained three items
+    # away (`Rename pane`, `Clear pane name`, `Send right-clicks to pane`).
+    # It is gone as a patch and kept as an OUTCOME: drip_pane_menu names every
+    # row it wants, so those three are absent by omission. The reasons stand —
+    # a pane's label is the agent's terminal title and a manual name freezes it
+    # (`herdr pane rename` still works), and the click that turns passthrough
+    # on is the click that hides the menu it would be turned off from. Only the
+    # SET half went: `Use Herdr right-click menu` is carried through whenever
+    # stock offers it, because the CLI can still put a pane in passthrough and
+    # this menu should remain the way out.
+    #
+    # The two live split arms are WIDENED to take both of their labels rather
+    # than duplicated, so a shell split keeps the focus and mode handling of
+    # the stock one and differs only in the launch env. Their 16-space
+    # indentation is what makes each anchor unique: the same lines exist at 12
+    # spaces in the #[cfg(test)] copy of the dispatcher. herdr's own tests find
+    # menu rows by POSITION or by the string "Close pane" — renaming that row
+    # to "Close" would fail those tests if anyone ran them, which the nix build
+    # does not (`doCheck = false`) and check-herdr-patches.sh does not either.
+    # That is a real cost of the rename, paid knowingly.
+    cat ${./context-menu-items.rs} >> src/app/state.rs
+    cat ${./context-menu-render.rs} >> src/ui/menus.rs
     cat ${./pane-menu-splits.rs} >> src/app/input/modal.rs
 
+    # The whole list, in our order, built from the one stock just finished
+    # assembling — so which CONDITIONAL rows exist stays herdr's decision (a
+    # swap only mid-swap, the passthrough exit only while in passthrough) and
+    # ours is only order and wording. Shadowing `items` right before the arm's
+    # tail expression is what makes this one anchor instead of four.
     substituteInPlace src/app/state.rs \
-      --replace-fail '                items.extend(["Split right", "Split down", "Zoom"]);' '                items.extend([DRIP_SPLIT_RIGHT_SHELL, DRIP_SPLIT_RIGHT_AGENT, DRIP_SPLIT_DOWN_SHELL, DRIP_SPLIT_DOWN_AGENT, "Zoom"]);'
+      --replace-fail '                items.push("Close pane");' '                items.push("Close pane"); let items = drip_pane_menu(items);'
+
+    # Two arms of our own, injected at the head of the live dispatcher, where
+    # `match (menu.kind, item) {` sits at 8 spaces (the #[cfg(test)] copy has
+    # it at 4). They set no trailing mode of their own: open_new_tab_dialog
+    # always moves to the tab-name prompt, while begin_tui_workspace_create
+    # only prompts when `prompt_new_workspace_name` is set and otherwise
+    # creates silently — leaving the mode on ContextMenu for a menu that has
+    # already been taken. Hence the leave_modal for exactly that case.
+    substituteInPlace src/app/input/modal.rs \
+      --replace-fail '        match (menu.kind, item) {' '        match (menu.kind, item) { (ContextMenuKind::Pane { ws_idx, pane_id, .. }, Some(crate::app::state::DRIP_NEW_TAB)) => { self.focus_pane_internal_via_api(ws_idx, pane_id); open_new_tab_dialog(&mut self.state); } (ContextMenuKind::Pane { ws_idx, pane_id, .. }, Some(crate::app::state::DRIP_NEW_SPACE)) => { self.focus_pane_internal_via_api(ws_idx, pane_id); self.begin_tui_workspace_create("tui.menu.workspace.create"); if self.state.mode == Mode::ContextMenu { leave_modal(&mut self.state); } }'
 
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '                Some("Split right"),' '                Some(crate::app::state::DRIP_SPLIT_RIGHT_SHELL | crate::app::state::DRIP_SPLIT_RIGHT_AGENT),'
+      --replace-fail '                Some("Split right"),' '                Some(crate::app::state::DRIP_AGENT_RIGHT | crate::app::state::DRIP_SHELL_RIGHT),'
 
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '                self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Right);' '                self.drip_split_focused_pane(crate::api::schema::SplitDirection::Right, item == Some(crate::app::state::DRIP_SPLIT_RIGHT_SHELL));'
+      --replace-fail '                self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Right);' '                self.drip_split_focused_pane(crate::api::schema::SplitDirection::Right, item == Some(crate::app::state::DRIP_SHELL_RIGHT));'
 
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '                Some("Split down"),' '                Some(crate::app::state::DRIP_SPLIT_DOWN_SHELL | crate::app::state::DRIP_SPLIT_DOWN_AGENT),'
+      --replace-fail '                Some("Split down"),' '                Some(crate::app::state::DRIP_AGENT_DOWN | crate::app::state::DRIP_SHELL_DOWN),'
 
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '                self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Down);' '                self.drip_split_focused_pane(crate::api::schema::SplitDirection::Down, item == Some(crate::app::state::DRIP_SPLIT_DOWN_SHELL));'
+      --replace-fail '                self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Down);' '                self.drip_split_focused_pane(crate::api::schema::SplitDirection::Down, item == Some(crate::app::state::DRIP_SHELL_DOWN));'
 
-    # pane-menu-trim: three items off the pane menu, because a menu is also a
-    # list of things you can hit by accident.
-    #   - `Rename pane` and `Clear pane name` — the pane label is the agent's
-    #     terminal title, which says what the pane is doing right now; a manual
-    #     name freezes that at whatever was true when you typed it. Renaming a
-    #     pane is still there for anyone who wants it, through the API
-    #     (`herdr pane rename`) — this takes it off the two-item-away gesture.
-    #   - `Send right-clicks to pane` — passthrough means this menu can no
-    #     longer be opened here, so the click that turns it on is the click
-    #     that hides the way back (the modifier in
-    #     `ui.right_click_passthrough_modifier`, if a host has set one).
+    substituteInPlace src/app/input/modal.rs \
+      --replace-fail '                Some("Close pane"),' '                Some(crate::app::state::DRIP_CLOSE),'
+
+    # Draw each row through the row builder instead of `Line::from(*item)`.
+    # `inner.width - 1` is the TEXT width: ratatui reserves the highlight
+    # symbol's column on every row, selected or not, so right-aligning inside
+    # what is left is what puts the glyph against the border.
+    substituteInPlace src/ui/menus.rs \
+      --replace-fail '        .map(|item| ListItem::new(Line::from(*item)))' '        .map(|item| ListItem::new(drip_menu_row(*item, inner.width.saturating_sub(1), p)))'
+
+    # ...and let the popup size itself for that column: two more columns for
+    # any row that has a glyph, none for a menu whose rows do not. Widening the
+    # `+ 4` instead would pad every menu in the app whether it needed it or not.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '            .map(|item| item.len() as u16)' '            .map(|item| item.len() as u16 + if crate::app::state::drip_menu_glyph(item).is_some() { 2 } else { 0 })'
+
+    # A separator is not a row you can land on. The hit test is the narrow
+    # place to say so once: it backs BOTH the click that activates a row and
+    # the mouse-move that highlights one, so a pointer crossing a separator
+    # leaves the highlight where it was and a click on one is treated like a
+    # click outside the menu.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '            Some((row - inner_y) as usize)' '            { let idx = (row - inner_y) as usize; if self.context_menu.as_ref().and_then(|menu| menu.items().get(idx).copied()) == Some(crate::app::state::DRIP_MENU_SEPARATOR) { None } else { Some(idx) } }'
+
+    # The keyboard half of the same rule. MenuListState is shared with menus
+    # that have no separators and cannot see the items, so the skip lives with
+    # the list instead. Both anchors are the LIVE handler at 20 spaces; the
+    # #[cfg(test)] copy sits at 16 and keeps stock behaviour.
+    substituteInPlace src/app/input/modal.rs \
+      --replace-fail '                    menu.list.move_prev();' '                    crate::app::state::drip_menu_move(menu, -1);'
+
+    substituteInPlace src/app/input/modal.rs \
+      --replace-fail '                    menu.list.move_next(menu.items().len());' '                    crate::app::state::drip_menu_move(menu, 1);'
+
+    # single-pane-borders: draw a pane's border even when it is the only pane.
     #
-    # Only the SET half goes. The item is one slot that reads
-    # `Use Herdr right-click menu` while a pane is in passthrough, and that
-    # half stays: `herdr pane input --right-click pane` and `pane split
-    # --right-click pane` can still put a pane there, and the menu should
-    # remain the way out. Filtering the finished list, rather than unpicking
-    # the pushes that build it, is what keeps this to one anchor and leaves
-    # every dispatch arm in place.
-    substituteInPlace src/app/state.rs \
-      --replace-fail '                items.push("Close pane");' '                items.push("Close pane"); items.retain(|item| !matches!(*item, "Rename pane" | "Clear pane name" | "Send right-clicks to pane"));'
+    # This is NOT the `ui.pane_borders` / `ui.pane_outer_borders` config — both
+    # are already true by default. herdr ANDs them with a hardcoded
+    # `pane_count() > 1`, so a lone pane loses its frame no matter what the
+    # config says, and there is no key to turn that off. A plugin cannot reach
+    # it either: this is the renderer, three expressions deep in ui/panes.rs.
+    #
+    # The frame is what tells you WHICH pane has focus and where a pane ends,
+    # and a workspace that opens with one pane spends its first minutes with
+    # neither. Splitting to get a border is a poor trade.
+    #
+    # The flag is patched where it is DEFINED, not at its five use sites: one
+    # answer, and no conditions rewritten. Every other thing `multi_pane` gates
+    # is already a no-op for a lone pane — `pane_to_right`/`pane_below` find no
+    # neighbour to find, and the gap shrink is keyed on having found one — so
+    # the only behaviour that changes is the border.
+    #
+    # The one use that is NOT about chrome is `should_dim`, which greys
+    # UNFOCUSED panes. It cannot fire here either: with one pane in the layout
+    # that pane is the focused one, so `!info.is_focused` is false whatever the
+    # flag says. That is why the third substitution can take both occurrences
+    # of its line (the second is the dimming pass) — check-herdr-patches.sh
+    # notes the count, and both are meant.
+    substituteInPlace src/ui/panes.rs \
+      --replace-fail '    let multi_pane = panes.len() > 1;' '    let multi_pane = true;'
+
+    substituteInPlace src/ui/panes.rs \
+      --replace-fail '    let multi_pane = tab.layout.pane_count() > 1;' '    let multi_pane = true;'
+
+    substituteInPlace src/ui/panes.rs \
+      --replace-fail '    let multi_pane = ws.layout.pane_count() > 1;' '    let multi_pane = true;'
   '';
 })
