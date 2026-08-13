@@ -14,9 +14,50 @@ tab_bar_position = "bottom"
 hide_tab_bar_when_single_tab = true
 
 agent_panel_sort = "priority"
+
+# The older spelling of theme.custom.accent below. herdr reads this one ONLY
+# when theme.custom.accent is unset, so the two cannot disagree in effect;
+# it is kept in step so that either key answers the same.
+accent = "#A6E3A1"
+
 [theme]
 name = "catppuccin"
+# Left off deliberately, and not just out of caution: the tokens below are
+# Mocha values, and they are applied on top of whichever base theme is
+# selected. Following the terminal into light mode would therefore paint our
+# dark chrome onto catppuccin-latte rather than switch flavours. A host that
+# wants the light half sets a Latte palette through the module's
+# `theme.palette` (nix-env's palette takes `variant = "latte"`).
 auto_switch = false
+
+# The drip's colour scheme, one token per line, matching the zellij theme so
+# the two multiplexers stack without a seam.
+#
+# GENERATED VALUES, HAND-PLACED FILE. nix/theme.nix is the generator and the
+# palette is what it reads; this block is that generator's output for the
+# default palette. On the nix path the module regenerates it and outranks
+# what is written here, so a host passing its own palette is never quietly
+# overruled by this file. It is spelled out anyway because apply-config.sh
+# links this file verbatim — the non-nix dev loop needs a theme too. Change
+# colours in the palette, not here, and re-render both together.
+[theme.custom]
+accent = "#A6E3A1"      # highlights, active borders (palette: accent -> green)
+panel_bg = "#181825"    # tab bar, panels, overlays, modals (bg_alt -> mantle)
+sidebar_bg = "#181825"  # the sidebar, same chrome plane (bg_alt -> mantle)
+surface_dim = "#1E1E2E" # separators (bg -> base)
+surface0 = "#313244"    # selected / focused row background (bg_surface)
+surface1 = "#45475A"    # hover / active
+overlay0 = "#6C7086"    # muted text: numbers, secondary info
+overlay1 = "#7F849C"    # brighter muted text
+subtext0 = "#A6ADC8"    # subdued labels (secondary)
+text = "#CDD6F4"        # main foreground (primary)
+mauve = "#CBA6F7"       # branch names, special labels
+green = "#A6E3A1"       # done / idle
+yellow = "#F9E2AF"      # working / running
+red = "#F38BA8"         # needs attention / blocked
+peach = "#FAB387"       # interrupted / warning
+blue = "#89B4FA"        # unseen / done notifications
+teal = "#94E2D5"        # notification accent, unseen markers
 
 [ui.sidebar.agents.rows_by_agent]
 claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"], ["$worktree"]]

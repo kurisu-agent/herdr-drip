@@ -45,8 +45,8 @@ under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Ctrl+b [` to flip a split,
 `Alt+Shift+arrows` for pane focus), sidebar rows wired to the plugins'
 `$worktree` token, a tab bar that hides itself while there is only one tab
 (`hide_tab_bar_when_single_tab` — one tab is not a choice, so the row showing
-it is a line of terminal spent on nothing), and the experimental
-kitty-graphics switch. Adopt it with:
+it is a line of terminal spent on nothing), the colour scheme (below), and the
+experimental kitty-graphics switch. Adopt it with:
 
 ```
 ./scripts/apply-config.sh
@@ -59,6 +59,34 @@ The config is path-free: keybindings reach the plugins through
 `herdr plugin action invoke`, and `default_shell` is a PATH-resolved
 `yolo-shell`. `apply-config.sh` links `scripts/yolo-shell` into
 `~/.local/bin` unless something already provides it.
+
+### The colour scheme
+
+`[theme.custom]` in the curated config is our palette — Catppuccin Mocha with
+`accent` pointed at green — mapped onto herdr's seventeen theme tokens. It is
+the same palette the zellij theme renders from, mapped the same way, because
+the two stack on one screen: herdr's chrome sits on `mantle` like zellij's
+topbar, and its active borders are green like zellij's `ribbon_selected`. The
+one departure from stock herdr is that accent: herdr's own Catppuccin uses
+blue.
+
+**Change colours in the palette, not in the TOML.** `nix/theme.nix` holds the
+mapping and generates the block; `config/herdr.toml` carries the render of it
+for the default palette, because `apply-config.sh` links that file verbatim and
+the non-nix path needs a theme too. On the nix path the module regenerates the
+tokens and outranks the file, so the two cannot drift into a disagreement that
+matters — and that they agree at all is one command to check:
+
+```
+nix-instantiate --eval -E '
+  let t = import ./nix/theme.nix; c = builtins.fromTOML (builtins.readFile ./config/herdr.toml);
+  in (t.mkTheme t.defaultPalette).theme.custom == c.theme.custom'
+```
+
+`theme.auto_switch` stays off on purpose: custom tokens are applied on top of
+whichever base theme is selected, so following the terminal into light mode
+would paint Mocha chrome onto Latte rather than switch flavours. Pass a Latte
+palette instead (see the module option below).
 
 **On NixOS, use the module instead — not a profile install.** The module
 (below) puts `yolo-shell` on the system PATH, and `apply-config.sh` refuses to
@@ -248,6 +276,31 @@ services.herdr-drip.plugins.settings = {
   theme.name = "gruvbox";
 };
 ```
+
+The colour scheme is an option rather than a wall of hex, and it takes a
+palette as **data** — colour name to hex, in the shape
+`nix-env/lib/palette.nix` produces, so passing ours through is one line:
+
+```nix
+services.herdr-drip.plugins.theme.palette = inputs.nix-env.lib.${pkgs.system}.palette;
+```
+
+Ours is the **default**, though, so a host that says nothing comes up in it
+anyway; the option exists so a different palette *can* be passed, not so one
+has to be. `nix/theme.nix` maps whatever arrives onto herdr's tokens — role
+aliases first (`accent`, `bg_alt`, `bg_surface`, `primary`, `secondary`),
+falling back to the Catppuccin names for a palette with no role layer — so
+re-tinting means editing one palette, not this repo. `theme.enable = false`
+generates no theme at all.
+
+That default is *vendored*, and it has to be: nix-env depends on
+nix-claude-drip, which depends on this repo, so a `nix-env` flake input here
+would close a cycle. `nix/theme.nix` therefore copies the Catppuccin Mocha
+rungs it reads — upstream values under upstream names — and every one of them
+is overwritten by name the moment a palette is passed in. Wiring it up
+properly would mean either a fourth repo holding the palette alone, which both
+sides depend on, or nix-env keeping the one-liner above; the one-liner is
+cheaper and is what the fleet does.
 
 Lists override wholesale — `keys.command` is one value, not one per entry —
 and `lib.mkForce` on a subtree drops its curated contents entirely. The

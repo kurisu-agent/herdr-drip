@@ -104,6 +104,11 @@ let
   # (apply-config.sh links it verbatim).
   curatedSettings = builtins.fromTOML (builtins.readFile ../config/herdr.toml);
 
+  # The colour scheme, generated from a palette rather than written out as
+  # hex. See nix/theme.nix for the mapping and for why our palette is the
+  # default rather than one option among several.
+  dripTheme = import ./theme.nix;
+
   # The merged config as a store path. Its hash changes with its content,
   # which is exactly what the relink check keys off: a symlink to an OLD
   # store copy means a previous generation's config, and is retargeted.
@@ -392,6 +397,45 @@ in
       '';
     };
 
+    theme = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Generate herdr's `[theme.custom]` tokens and `ui.accent` from
+          `theme.palette`. Off, the colour scheme is whatever the curated
+          config and `settings` say — use it on a host that themes herdr by
+          hand, or one that wants a built-in theme unmodified
+          (`settings.theme.name`) with no per-token overrides on top.
+        '';
+      };
+
+      palette = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = dripTheme.defaultPalette;
+        defaultText = lib.literalExpression "the drip's Catppuccin Mocha palette (nix/theme.nix)";
+        example = lib.literalExpression "inputs.nix-env.lib.\${pkgs.system}.palette";
+        description = ''
+          Colour name -> hex, in the shape `nix-env/lib/palette.nix`
+          produces: the Catppuccin names (`mauve`, `green`, `surface0`, …)
+          plus the role aliases layered over them (`accent`, `bg_alt`,
+          `bg_surface`, `primary`, `secondary`). Roles win where a herdr
+          token has one, so re-pointing `accent` re-tints herdr without
+          touching a colour name.
+
+          Our palette is the DEFAULT — a host that sets nothing comes up in
+          our colour scheme. Setting this replaces it wholesale (it is one
+          value, not one per colour), which is what a host with different
+          colours wants; to move a single colour, override the palette at
+          its own source and pass that, or set the one herdr token through
+          `settings.theme.custom`.
+
+          Only the keys `nix/theme.nix` reads matter; extra keys are
+          ignored, so a fuller palette passes through unharmed.
+        '';
+      };
+    };
+
     curatedDefaults = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -448,12 +492,28 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # The curated config lands as a default on every leaf, so any single
-    # key a host sets through `settings` outranks it and the rest of the
-    # file rides along untouched.
-    services.herdr-drip.plugins.settings = lib.mkIf cfg.curatedDefaults (
-      lib.mapAttrsRecursive (_: lib.mkDefault) curatedSettings
-    );
+    # Three layers, weakest first, all at leaf level so a host that sets one
+    # key keeps every other one:
+    #
+    #   1000 (mkDefault)  the curated config/herdr.toml, as before;
+    #    900              the palette-generated theme;
+    #    100 (a plain     whatever the host puts in `settings`.
+    #         assignment)
+    #
+    # The middle rung is what makes the palette authoritative for colour on
+    # the nix path. config/herdr.toml carries the same tokens — it has to,
+    # because apply-config.sh links that file verbatim and the non-nix dev
+    # loop would otherwise have no theme — but they are the RENDER of the
+    # default palette, not a second opinion about it. A host that passes its
+    # own palette must not have that render silently win, and it does not:
+    # 900 outranks 1000. A host that sets `settings.theme.custom.<token>`
+    # directly still outranks both.
+    services.herdr-drip.plugins.settings = lib.mkMerge [
+      (lib.mkIf cfg.curatedDefaults (lib.mapAttrsRecursive (_: lib.mkDefault) curatedSettings))
+      (lib.mkIf cfg.theme.enable (
+        lib.mapAttrsRecursive (_: lib.mkOverride 900) (dripTheme.mkTheme cfg.theme.palette)
+      ))
+    ];
 
     # The published plugin directories. This is also what keeps them alive:
     # the registry holds paths, not store references, so without an entry in
