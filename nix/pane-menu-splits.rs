@@ -1,7 +1,9 @@
 // pane-menu-splits: the shell half of the pane context menu's split entries.
 // Appended to src/app/input/modal.rs by nix/herdr-patches.nix, whose two
 // one-line anchors widen the existing "Split right" / "Split down" arms to
-// accept the "(shell)" labels and route them here.
+// accept both of that direction's labels and route them here. The labels
+// themselves are in nix/pane-menu-labels.rs, which also fixes their order in
+// the menu; the `shell` argument below is just which of the pair was clicked.
 //
 // All this adds over herdr's own `split_focused_pane_via_api` is the launch
 // env: PaneSplitParams already carries an `env` map to the spawned pane (that

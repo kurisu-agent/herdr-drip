@@ -185,37 +185,49 @@ herdrPkg.overrideAttrs (old: {
     substituteInPlace src/app/creation.rs \
       --replace-fail '        self.create_workspace_with_launch_env(initial_cwd, focus, Vec::new())' '        self.create_workspace_with_launch_env(initial_cwd, focus, vec![("HERDR_DRIP_PANE_KIND".to_string(), "shell".to_string())])'
 
-    # shell-splits: `Split right (shell)` and `Split down (shell)` beside the
-    # pane menu's existing two, for a terminal next to the agent instead of a
-    # second agent. With shell-panes above, splitting is now the ONLY gesture
-    # that starts claude, so the pane menu is where both answers have to live.
+    # shell-splits: four split entries on the pane menu instead of two — a
+    # shell and an agent, each way — for a terminal next to the agent instead
+    # of a second agent. With shell-panes above, splitting is now the ONLY
+    # gesture that starts claude, so the pane menu is where both answers have
+    # to live.
     #
     # No plugin can add them: a plugin's [[actions]] reach the command palette
     # and keybindings, never herdr's context menus, and the menu's items are a
     # `&'static str` list compiled into ContextMenuState::items.
     #
+    # The list is ordered by DIRECTION — right (shell), right (agent), down
+    # (shell), down (agent) — so the two rows you pick between sit adjacent,
+    # and each carries two Codicon glyphs naming the direction and the kind.
+    # Both labels and glyphs live in pane-menu-labels.rs, appended to state.rs
+    # because that is the module the dispatcher can name (see the file). Note
+    # that `Split right` no longer means "an agent" by omission: the agent rows
+    # say so, which is the whole point of shell-panes being upstream of them.
+    #
     # The two live arms in apply_context_menu_action_via_api are widened to
-    # accept the new labels rather than duplicated, so the shell split keeps
-    # the focus and mode handling of the stock one and the only difference is
-    # the launch env. The 16-space indentation is what makes each anchor
-    # unique: the same lines exist at 12 spaces in the #[cfg(test)] copy of the
-    # dispatcher, which must keep matching herdr's own tests.
+    # accept both of their labels rather than duplicated, so the shell split
+    # keeps the focus and mode handling of the stock one and the only
+    # difference is the launch env. The 16-space indentation is what makes each
+    # anchor unique: the same lines exist at 12 spaces in the #[cfg(test)] copy
+    # of the dispatcher, which keeps matching herdr's own tests — those drive
+    # the menu by item POSITION or by "Close pane", never by a split label, so
+    # renaming these four is invisible to them.
+    cat ${./pane-menu-labels.rs} >> src/app/state.rs
     cat ${./pane-menu-splits.rs} >> src/app/input/modal.rs
 
     substituteInPlace src/app/state.rs \
-      --replace-fail '                items.extend(["Split right", "Split down", "Zoom"]);' '                items.extend(["Split right", "Split down", "Split right (shell)", "Split down (shell)", "Zoom"]);'
+      --replace-fail '                items.extend(["Split right", "Split down", "Zoom"]);' '                items.extend([DRIP_SPLIT_RIGHT_SHELL, DRIP_SPLIT_RIGHT_AGENT, DRIP_SPLIT_DOWN_SHELL, DRIP_SPLIT_DOWN_AGENT, "Zoom"]);'
 
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '                Some("Split right"),' '                Some("Split right" | "Split right (shell)"),'
+      --replace-fail '                Some("Split right"),' '                Some(crate::app::state::DRIP_SPLIT_RIGHT_SHELL | crate::app::state::DRIP_SPLIT_RIGHT_AGENT),'
 
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '                self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Right);' '                self.drip_split_focused_pane(crate::api::schema::SplitDirection::Right, item == Some("Split right (shell)"));'
+      --replace-fail '                self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Right);' '                self.drip_split_focused_pane(crate::api::schema::SplitDirection::Right, item == Some(crate::app::state::DRIP_SPLIT_RIGHT_SHELL));'
 
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '                Some("Split down"),' '                Some("Split down" | "Split down (shell)"),'
+      --replace-fail '                Some("Split down"),' '                Some(crate::app::state::DRIP_SPLIT_DOWN_SHELL | crate::app::state::DRIP_SPLIT_DOWN_AGENT),'
 
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '                self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Down);' '                self.drip_split_focused_pane(crate::api::schema::SplitDirection::Down, item == Some("Split down (shell)"));'
+      --replace-fail '                self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Down);' '                self.drip_split_focused_pane(crate::api::schema::SplitDirection::Down, item == Some(crate::app::state::DRIP_SPLIT_DOWN_SHELL));'
 
     # pane-menu-trim: three items off the pane menu, because a menu is also a
     # list of things you can hit by accident.

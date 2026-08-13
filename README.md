@@ -477,10 +477,11 @@ same way the plugin directories curate everything else. Current set:
   your way out of herdr is how you reload it. See below.
 - **shell-panes** — a new workspace or tab opens a terminal, not an agent.
   Splitting is what asks for claude. See below.
-- **shell-splits** — `Split right (shell)` and `Split down (shell)` beside the
-  pane menu's existing two, so the split can be either answer. A plugin's
+- **shell-splits** — four split entries on the pane menu instead of two, a
+  shell and an agent each way, ordered by direction and glyphed. A plugin's
   `[[actions]]` reach the palette and the keybindings, never herdr's context
-  menus, whose items are a `&'static str` list compiled into the binary.
+  menus, whose items are a `&'static str` list compiled into the binary. See
+  below.
 - **pane-menu-trim** — three items off that same menu: `Rename pane`,
   `Clear pane name` and `Send right-clicks to pane`. See below.
 
@@ -568,7 +569,7 @@ The split is by gesture, not by pane:
 | New workspace — the sidebar's `+`, the `new_workspace` key, the name prompt | shell |
 | New tab | shell |
 | `New worktree`, `Open worktree...`, and the workspace herdr seeds at startup | shell |
-| `Split right` / `Split down`, from the pane menu or `Ctrl+b r`/`d` | claude |
+| `Split right (agent)` / `Split down (agent)`, and `Ctrl+b r`/`d` | claude |
 | `Split right (shell)` / `Split down (shell)` (**shell-splits**) | shell |
 | A session restore | whatever that pane was |
 
@@ -608,6 +609,53 @@ A shell pane records itself the moment it starts.
 The rest of the pane menu is untouched — `Swap with focused pane`, `Zoom` and
 `Close pane` rearrange panes that already exist, and none of them starts
 anything.
+
+### shell-splits: four rows, ordered by direction
+
+Both answers, each way, grouped under the direction rather than under the kind:
+
+```
+ Swap with focused pane
+   Split right (shell)
+   Split right (agent)
+   Split down (shell)
+   Split down (agent)
+ Zoom
+ Close pane
+```
+
+You pick the direction first — that is the part you can see in the layout in
+front of you — so the two rows you are then choosing between sit adjacent
+instead of two apart. And `Split right` no longer means "an agent" by
+omission: with **shell-panes** upstream, a split is the only gesture that
+starts claude, so the row that does it says so.
+
+The glyphs are all Codicons, from the `U+EA60`–`U+EBEB` block every Nerd Font
+since v2.3 carries — one family, so the four rows share a weight, and off the
+Material Design plane (`U+F0000`+) whose codepoints moved wholesale between
+Nerd Fonts v2 and v3:
+
+| Glyph | Codepoint | Name | Means |
+| --- | --- | --- | --- |
+|  | `U+EB56` | `cod-split_horizontal` | panes side by side — `right` |
+|  | `U+EB57` | `cod-split_vertical` | panes stacked — `down` |
+|  | `U+EA85` | `cod-terminal` | a shell |
+|  | `U+EB08` | `cod-hubot` | an agent |
+
+The words stay rather than letting the glyph carry the whole meaning: a
+terminal whose font lacks the block draws boxes, and every row still reads.
+They say `right`/`down`, not horizontal/vertical, because those two inverted
+somewhere between tmux (`split -h` is side by side) and vim (`:split` is
+stacked) — the glyph is the half that cannot be read backwards.
+
+Labels and glyphs are four consts in `nix/pane-menu-labels.rs`, appended to
+herdr's `app::state`, which each read three times over: the item list, the
+match arm that accepts the label, and the comparison that decides shell or
+agent. That direction is forced — `app::state` is `pub mod` and `app::input`
+is private, so the dispatcher can name a const defined in state.rs and not the
+other way round. herdr's own tests drive this menu by item position or by
+`Close pane`, never by a split label, so renaming these four is invisible to
+them.
 
 ### pane-menu-trim: three fewer ways to hit the wrong thing
 
