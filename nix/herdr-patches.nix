@@ -114,6 +114,74 @@ herdrPkg.overrideAttrs (old: {
     substituteInPlace src/ui/sidebar.rs \
       --replace-fail '    let detail_content_area = Rect::new(' '    drip_render_accounts_collapsed(app, frame, drip_accounts_rect(area, detail_area, 1), &drip_account_dots(&drip_accounts_lines())); let detail_content_area = Rect::new('
 
+    # sidebar-git-status: the workspace row's git_status token learns the rest
+    # of what the claude-drip statusline says about the same checkout — the
+    # short HEAD hash and the added / modified / deleted counts, as bare
+    # coloured numbers with no glyph. Stock says only `↑4 ↓1`, so a space could
+    # show "4 ahead" while the pane beside it showed "and 3 files uncommitted".
+    # Two rows, one working tree, two vocabularies. See sidebar-git-status.rs
+    # for the layout, the colours and what the counts cost.
+    #
+    # No plugin surface reaches it: a plugin's `$token` is one string with one
+    # style, so it cannot paint three counts in three colours, and nothing in
+    # the plugin API can add a field to a sidebar token's data or to how one is
+    # measured.
+    cat ${./sidebar-git-status.rs} >> src/ui/sidebar.rs
+
+    # The token needs to know WHICH checkout it is describing, which the token
+    # context does not carry — ahead/behind arrives already computed, so no
+    # consumer has ever needed the path. One field, and one line to fill it.
+    #
+    # The second anchor matches TWICE on purpose (the check script says so):
+    # herdr builds this context in two places, `workspace_row_height` and the
+    # renderer, and a row measured without the counts and drawn with them is a
+    # clipped row. Both sites have `ws` in scope and want the identical value,
+    # so one substitution is the honest way to say "both".
+    substituteInPlace src/ui/sidebar/tokens.rs \
+      --replace-fail '    pub suppress_git_details: bool,' '    pub suppress_git_details: bool, pub drip_repo: Option<std::path::PathBuf>,'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail 'ahead_behind: ws.git_ahead_behind(),' 'ahead_behind: ws.git_ahead_behind(), drip_repo: drip_workspace_repo(ws),'
+
+    # The details ride ON the existing token rather than beside it, because a
+    # token is what the row's width budget is computed from: a separate token
+    # would be measured, separated (` · `) and truncated on its own terms, and
+    # `a1c3 · 3 · 2 · 1` is not what either row says today.
+    substituteInPlace src/ui/sidebar/tokens.rs \
+      --replace-fail '    GitStatus { ahead: usize, behind: usize },' '    GitStatus { ahead: usize, behind: usize, drip: super::DripGitDetails },'
+
+    # ...and the token has to SURVIVE a repo that is level with its upstream,
+    # which stock drops on the floor (`filter(ahead > 0 || behind > 0)`) — the
+    # case where the counts are the only thing left to say, and the one the
+    # request came from. `or(Some((0, 0)))` supplies the pair the rest of the
+    # chain destructures; the added disjunct is what keeps the token alive.
+    substituteInPlace src/ui/sidebar/tokens.rs \
+      --replace-fail '.filter(|(ahead, behind)| *ahead > 0 || *behind > 0)' '.or(Some((0, 0))).filter(|(ahead, behind)| *ahead > 0 || *behind > 0 || !super::drip_git_details_for(context.drip_repo.as_deref()).is_empty())'
+
+    substituteInPlace src/ui/sidebar/tokens.rs \
+      --replace-fail '.map(|(ahead, behind)| ResolvedTokenKind::GitStatus { ahead, behind }),' '.map(|(ahead, behind)| ResolvedTokenKind::GitStatus { ahead, behind, drip: super::drip_git_details_for(context.drip_repo.as_deref()) }),'
+
+    # Bind the new field in both arms that match the token — the one that
+    # measures it and the one that paints it. Two occurrences, one meaning.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail 'ResolvedTokenKind::GitStatus { ahead, behind } => {' 'ResolvedTokenKind::GitStatus { ahead, behind, drip } => {'
+
+    # Measure, then paint, by ADDING to stock's terms rather than replacing
+    # them: stock's sum keeps measuring the arrows and stock's pushes keep
+    # drawing them, and the drip's half measures and draws exactly the pieces
+    # it adds. Each anchor is one line, and neither of the two arms is rewritten
+    # — so a herdr that changes how it renders `↑4` changes it here too, and
+    # only a herdr that MOVES these lines fails the build.
+    #
+    # The drip's pieces go in FRONT of the arrows, so the leading run of the
+    # row is character-for-character the statusline's `<branch> <hash> <a> <m>
+    # <d>` and herdr's own fact lands after it.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '                    + usize::from(*ahead > 0 && *behind > 0)' '                    + usize::from(*ahead > 0 && *behind > 0) + drip_git_status_extra_width(*ahead, *behind, drip)'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '                if *ahead > 0 {' '                spans.extend(drip_git_status_spans(*ahead, *behind, drip, secondary_style, p, token.style)); if *ahead > 0 {'
+
     # last-close-quits: closing the last pane stops the server, instead of
     # leaving an empty herdr running. Stock herdr treats "no workspaces left"
     # as a state to sit in — the sidebar empties and the server keeps its
