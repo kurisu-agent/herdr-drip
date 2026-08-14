@@ -7,27 +7,29 @@
 //
 // Stock herdr's `git_status` token says exactly one thing about a checkout:
 // how far HEAD is from its upstream, `↑4 ↓1`. The claude-drip statusline --
-// the row every agent pane in this drip already carries -- says four more
+// the row every agent pane in this drip already carries -- says four other
 // things about the same checkout: the short HEAD hash, and how many files are
 // added, modified and deleted, as bare coloured numbers with no glyph
 // (nix-claude-drip, lib/claude.nix `mkStatusBin`). So the sidebar could show
 // `↑4` for a space whose pane, two inches to the right, was showing
 // `a1c3 2 3` -- two rows describing one working tree in two vocabularies,
-// neither of them complete. This closes that seam from the sidebar's side.
+// neither of them the other's. This closes that seam from the sidebar's side,
+// by making the token speak the pane's:
 //
-//     main a1c3 3 2 1 ↑4
-//     │    │    │ │ │ └ ahead of upstream (stock, green)
+//     main a1c3 3 2 1
 //     │    │    │ │ └ deleted   (red)
 //     │    │    │ └ modified    (yellow)
 //     │    │    └ added         (teal)
 //     │    └ short HEAD hash
 //     └ branch (stock token, untouched)
 //
-// The drip's four pieces sit TOGETHER and ahead of herdr's arrows, so the
-// leading run of the row is character-for-character the statusline's own
-// `<branch> <hash> <a> <m> <d>` and herdr's extra fact lands after it. That is
-// also why stock's ↑/↓ code is not rewritten but merely rendered after: this
-// patch adds to that arm, it does not replace it.
+// The arrow is GONE, not restyled and not folded in: it is herdr's answer to a
+// question the statusline does not ask, and nineteen columns shared by two
+// dialects is the thing being fixed. herdr's own arrow code is left standing
+// in both arms of the match and simply fed a zeroed ahead/behind pair by the
+// patch (see herdr-patches.nix), so every branch of it tests a constant zero
+// and every term of it multiplies by false. Nothing here draws or measures an
+// arrow, and nothing here has to know how herdr would have.
 //
 // The BRANCH is stock -- already its own token in the row -- and this patch
 // does not touch its colour. The hash borrows that token's style rather than
@@ -40,8 +42,7 @@
 // so it cannot paint three counts in three colours; and nothing in the plugin
 // API can add a field to a sidebar token's data or to how one is measured.
 //
-// WHAT IT COSTS. Ahead/behind still comes from herdr's own cached git refresh
-// and costs nothing new. Dirty counts exist nowhere in herdr, so this runs
+// WHAT IT COSTS. Dirty counts exist nowhere in herdr, so this runs
 // `git status --porcelain` itself -- NEVER on the draw thread. A draw reads a
 // cache; when that answer has gone stale the draw starts a background thread
 // and paints the previous one, which is at most `DRIP_GIT_TTL` old. A repo no
@@ -102,10 +103,11 @@ enum DripGitTone {
     Deleted,
 }
 
-/// The drip's pieces, in the statusline's order: what this checkout IS, then
+/// The token's pieces, in the statusline's order: what this checkout IS, then
 /// what is uncommitted in it. Each is omitted when it is zero -- a clean tree
 /// shows only the hash, and a space that is not a repo shows nothing at all,
-/// which is what keeps a non-git space looking exactly like stock.
+/// which is what keeps a non-git space looking exactly like stock (stock's own
+/// half of the token draws nothing either way now).
 fn drip_git_status_pieces(drip: &DripGitDetails) -> Vec<(String, DripGitTone)> {
     let mut pieces = Vec::new();
     if let Some(hash) = drip.hash.as_ref() {
@@ -123,10 +125,12 @@ fn drip_git_status_pieces(drip: &DripGitDetails) -> Vec<(String, DripGitTone)> {
     pieces
 }
 
-/// What the drip ADDS to the token's width: its own pieces, the single spaces
-/// between them, and one more space when stock has an arrow to draw after
-/// them. Stock's own term is left standing in the arm and measures the arrows,
-/// so the two halves of the sum each measure what they draw.
+/// The token's width: its pieces and the single spaces between them. It is the
+/// WHOLE width, not an addition -- stock's three terms are still summed beside
+/// it in the arm, but with a zeroed ahead/behind pair they are three zeroes,
+/// so nothing but this measures anything. Nothing trails it either: the last
+/// piece is the last thing in the token, so there is no separator to budget
+/// for and no stray column at the end of the row.
 ///
 /// This is a FIXED width in `resolved_token_spans`: the row shrinks its
 /// flexible tokens (the branch name) before it gives up anything here. That is
@@ -134,12 +138,8 @@ fn drip_git_status_pieces(drip: &DripGitDetails) -> Vec<(String, DripGitTone)> {
 /// truncated branch is still a branch, half a count is a lie -- but it does
 /// mean a very dirty tree can push a long branch name out of a narrow sidebar.
 /// The counts are 1-2 columns each and only there when non-zero, so the
-/// realistic worst case is `a1c3 3 2 1 ↑4`, 13 of the sidebar's 26.
-pub(crate) fn drip_git_status_extra_width(
-    ahead: usize,
-    behind: usize,
-    drip: &DripGitDetails,
-) -> usize {
+/// realistic worst case is `a1c3 3 2 1`, 10 of the sidebar's 26.
+pub(crate) fn drip_git_status_width(drip: &DripGitDetails) -> usize {
     let pieces = drip_git_status_pieces(drip);
     if pieces.is_empty() {
         return 0;
@@ -148,20 +148,21 @@ pub(crate) fn drip_git_status_extra_width(
         .iter()
         .map(|(text, _)| display_width(text))
         .sum::<usize>();
-    content + pieces.len() - 1 + usize::from(ahead > 0 || behind > 0)
+    content + pieces.len() - 1
 }
 
-/// The drip's pieces, painted, plus the space that separates them from stock's
-/// arrows when there are any. `hash_style` is the row's BRANCH style, passed
-/// in by the caller rather than chosen here (see the header).
+/// The token, painted: the pieces and the single spaces between them, and
+/// nothing after the last one -- stock's pushes still run in the same arm but
+/// have a zeroed pair to test, so this is the entire token and it must not
+/// leave a separator hanging for something that is never coming. `hash_style`
+/// is the row's BRANCH style, passed in by the caller rather than chosen here
+/// (see the header).
 ///
 /// The counts take the statusline's three roles: added is `teal` (its
 /// `SUCCESS`, and the same hex -- #94E2D5), modified `yellow`, deleted `red`.
 /// All three are palette TOKENS, so the row retints from `[theme.custom]` with
 /// a `herdr server reload-config` and no rebuild.
 pub(crate) fn drip_git_status_spans(
-    ahead: usize,
-    behind: usize,
     drip: &DripGitDetails,
     hash_style: Style,
     p: &Palette,
@@ -180,9 +181,6 @@ pub(crate) fn drip_git_status_spans(
             DripGitTone::Deleted => Style::default().fg(p.red),
         };
         spans.push(Span::styled(text, apply_token_style(style, patch)));
-    }
-    if !spans.is_empty() && (ahead > 0 || behind > 0) {
-        spans.push(Span::styled(" ", apply_token_style(Style::default(), patch)));
     }
     spans
 }
