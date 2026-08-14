@@ -19,8 +19,11 @@
 /// The row, drawn to fill exactly `width` columns.
 ///
 /// `width` is the list's TEXT width — the popup's inner width less the column
-/// ratatui reserves for `highlight_symbol`. Right-aligning inside it puts the
-/// glyph flush against the popup's right border.
+/// ratatui reserves for `highlight_symbol`. The glyph is right-aligned inside
+/// it with ONE COLUMN held back, so it sits a space clear of the popup's right
+/// border rather than against it. That column is paid for by the sizing patch
+/// in mouse.rs (`+ 3` for a row with a glyph, not `+ 2`), so the margin comes
+/// out of the popup's width and never out of the label's.
 ///
 /// Neither the label nor the glyph sets a foreground: they inherit the list's
 /// style, so the selected row's highlight repaints them like any other text. A
@@ -46,7 +49,8 @@ pub(super) fn drip_menu_row(
     let Some(glyph) = crate::app::state::drip_menu_glyph(item) else {
         return Line::from(item);
     };
-    let gap = (width as usize).saturating_sub(item.len() + 1);
+    // item + gap + glyph + the one-column right margin == width.
+    let gap = (width as usize).saturating_sub(item.len() + 2);
     if gap == 0 {
         return Line::from(item);
     }
@@ -55,5 +59,48 @@ pub(super) fn drip_menu_row(
         Span::raw(item),
         Span::raw(" ".repeat(gap)),
         Span::raw(glyph),
+        Span::raw(" "),
     ])
+}
+
+/// The context menu's popup shell: rounded, and neutral instead of accented.
+///
+/// Stock draws it with `render_panel_shell(.., p.accent, p.panel_bg)`, which
+/// is square-cornered (`border::PLAIN`) and paints the border in the accent —
+/// so the menu arrived as a coloured box in a UI whose accent is otherwise
+/// reserved for what is ACTIVE. It is a transient popup, not a selection, and
+/// a neutral frame says so. Rounded to match the pane frames, which the
+/// rounded-corners patch already softened.
+///
+/// Not a change to `render_panel_shell` itself, deliberately: that helper is
+/// shared with the dialogs, the settings panel and the navigator, and rounding
+/// it there would round all of them on the strength of a request about one
+/// menu. One call site, one anchor.
+///
+/// The colours are TOKENS, not literals — `surface1` for the border and (via
+/// the highlight patch) `surface0` for the selected row — so the shade is
+/// tunable from config.toml with a `herdr server reload-config`, instead of
+/// costing a herdr rebuild every time an eye disagrees with it.
+///
+/// `Block`, `Borders` and `BorderType` are fully qualified because menus.rs
+/// imports `Clear, List, ListItem, ListState, Paragraph` and none of those;
+/// adding a `use` would need a second anchor for nothing.
+pub(super) fn drip_menu_shell(
+    frame: &mut Frame,
+    area: Rect,
+    p: &crate::app::state::Palette,
+) -> Option<Rect> {
+    if area.width < 2 || area.height < 2 {
+        return None;
+    }
+
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(p.surface1))
+        .style(Style::default().bg(p.panel_bg));
+    let inner = block.inner(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+    Some(inner)
 }

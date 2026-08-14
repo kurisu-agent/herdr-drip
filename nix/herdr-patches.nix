@@ -283,15 +283,41 @@ herdrPkg.overrideAttrs (old: {
     # Draw each row through the row builder instead of `Line::from(*item)`.
     # `inner.width - 1` is the TEXT width: ratatui reserves the highlight
     # symbol's column on every row, selected or not, so right-aligning inside
-    # what is left is what puts the glyph against the border.
+    # what is left is what the glyph is positioned against.
     substituteInPlace src/ui/menus.rs \
       --replace-fail '        .map(|item| ListItem::new(Line::from(*item)))' '        .map(|item| ListItem::new(drip_menu_row(*item, inner.width.saturating_sub(1), p)))'
 
-    # ...and let the popup size itself for that column: two more columns for
-    # any row that has a glyph, none for a menu whose rows do not. Widening the
+    # ...and let the popup size itself for that column: THREE more columns for
+    # any row that has a glyph, none for a menu whose rows do not. Three, not
+    # two: one for the glyph, one for the gap that separates it from the label,
+    # and one for the margin that keeps it off the right border. Widening the
     # `+ 4` instead would pad every menu in the app whether it needed it or not.
     substituteInPlace src/app/input/mouse.rs \
-      --replace-fail '            .map(|item| item.len() as u16)' '            .map(|item| item.len() as u16 + if crate::app::state::drip_menu_glyph(item).is_some() { 2 } else { 0 })'
+      --replace-fail '            .map(|item| item.len() as u16)' '            .map(|item| item.len() as u16 + if crate::app::state::drip_menu_glyph(item).is_some() { 3 } else { 0 })'
+
+    # The menu's frame: rounded, and neutral rather than accent-coloured. Only
+    # the ONE call site moves — `render_panel_shell` itself is shared with the
+    # dialogs, settings and navigator, and rounding it there would round every
+    # panel in the app off a request about this menu. See drip_menu_shell.
+    substituteInPlace src/ui/menus.rs \
+      --replace-fail 'let Some(inner) = render_panel_shell(frame, menu_rect, p.accent, p.panel_bg) else {' 'let Some(inner) = drip_menu_shell(frame, menu_rect, p) else {'
+
+    # ...and the selected row with it. Stock fills it with the accent, which on
+    # a menu whose frame is no longer accented is the last coloured block left.
+    # `surface0` is the same neutral the unselected tab carries, so a menu
+    # highlight and a tab read as the same kind of thing.
+    #
+    # The foreground has to move WITH it and cannot be left to
+    # `panel_contrast_fg`: that helper answers `surface_dim` whenever panel_bg
+    # is `Reset` (which it is, the chrome being transparent), and dark text was
+    # legible on the accent but would be dark-on-dark here. `text` is the
+    # foreground every other row in the list already uses, so the highlight now
+    # differs from its neighbours by background alone.
+    substituteInPlace src/ui/menus.rs \
+      --replace-fail '                .bg(p.accent)' '                .bg(p.surface0)'
+
+    substituteInPlace src/ui/menus.rs \
+      --replace-fail '                .fg(panel_contrast_fg(p))' '                .fg(p.text)'
 
     # A separator is not a row you can land on. The hit test is the narrow
     # place to say so once: it backs BOTH the click that activates a row and
