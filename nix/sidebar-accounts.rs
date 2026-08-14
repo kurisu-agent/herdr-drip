@@ -257,12 +257,15 @@ pub(crate) fn drip_accounts_split(detail: Rect, lines: &[DripAccountLine]) -> (R
     if lines.is_empty() || detail.width == 0 {
         return (detail, Rect::default());
     }
-    // A separator, a header, a blank line, then the rows, then one blank row
-    // under them. The blank above is not decoration: without it the first
-    // account's row reads as part of the header, the same way the agent list
-    // gets one. The blank BELOW is carved here but never drawn -- the rail's
-    // rect stops short of it (`drip_accounts_rect`'s `reserved`), so it is
-    // taken from the agent panel exactly once rather than eating an account.
+    // A separator, then the rows, then one blank row under them. The rail used
+    // to spend two more rows above -- a title and a blank under it -- and the
+    // blank was load-bearing while the title was there, keeping the first
+    // account from reading as part of it. With no title there is nothing for
+    // the first row to run into, so the separator alone opens the rail, the
+    // way it separates the workspace list from the agents. The blank BELOW is
+    // carved here but never drawn -- the rail's rect stops short of it
+    // (`drip_accounts_rect`'s `reserved`), so it is taken from the agent panel
+    // exactly once rather than eating an account.
     //
     // What is left after the agents' floor and this chrome is the rows the
     // accounts may have, and [`drip_fit`] decides how many of them are worth
@@ -583,7 +586,7 @@ mod drip_accounts_tests {
         assert!(tall.0.height >= DRIP_AGENT_PANEL_FLOOR);
         // Whatever the split, the two halves tile the area they came from.
         assert_eq!(tall.0.height + tall.1.height, 40);
-        // Separator, title, blank, one row per line, then the footer blank.
+        // Separator, one row per line, then the footer blank.
         assert_eq!(
             tall.1.height,
             lines.len() as u16 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS
