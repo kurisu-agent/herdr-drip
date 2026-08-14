@@ -216,9 +216,10 @@ pub(crate) fn drip_account_dots(lines: &[DripAccountLine]) -> Vec<char> {
 /// How many of `lines` to draw in `height` rows.
 ///
 /// All of them when they fit. When they do not, the cut lands on an account
-/// boundary rather than wherever the row count ran out: half an account is two
-/// numbers with nothing saying which window either belongs to, and the second
-/// row of a pair is the one that carries the week. Trailing blanks go with it,
+/// boundary rather than wherever the row count ran out: a partial account is a
+/// stack of numbers with nothing saying which window any of them belongs to,
+/// and the later rows of a group are the ones that carry the week and the
+/// Fable weekly. Trailing blanks go with it,
 /// so a truncated rail never ends on the spacer that was meant to separate the
 /// account it just dropped.
 ///
@@ -453,18 +454,22 @@ mod drip_accounts_tests {
         drip_parse_line(tagged).expect("parses")
     }
 
-    /// The rail as gumbo writes it: three accounts of two rows each, blanks
-    /// between them. Eight lines, and the blanks are rows like any other.
+    /// The rail as gumbo writes it: three accounts of three rows each -- 5h,
+    /// 7d, the Fable weekly -- blanks between them. Eleven lines, and the
+    /// blanks are rows like any other.
     fn rail() -> Vec<DripAccountLine> {
         [
             "ga ▸●  46% ▰▰▱▱▱▱ 11m",
             "rc     96% ▰▰▰▰▰▱ 5d",
+            "gc     52% ▰▰▰▱▱▱ 5d",
             "-c",
             "ga  ●   0% ▱▱▱▱▱▱",
             "gc     44% ▰▰▰▱▱▱ 5d",
+            "yc     78% ▰▰▰▰▱▱ 5d",
             "-c",
             "ga  ●  31% ▰▱▱▱▱▱ 43m",
             "gc      8% ▱▱▱▱▱▱ 6d",
+            "gc     12% ▱▱▱▱▱▱ 6d",
         ]
         .into_iter()
         .map(line)
@@ -508,10 +513,12 @@ mod drip_accounts_tests {
     fn an_accounts_dot_is_the_worst_of_its_rows() {
         let lines = rail();
 
-        // A green hour over a red week is a red account: one dot, worst news.
-        // The blanks fold into the account above them and change nothing --
-        // they grade `-`, which ranks below everything.
-        assert_eq!(drip_account_dots(&lines), vec!['r', 'g', 'g']);
+        // A green hour over a red week is a red account, and a yellow Fable
+        // row under two green windows is a yellow one: one dot, worst news,
+        // whichever of the three rows carries it. The blanks fold into the
+        // account above them and change nothing -- they grade `-`, which
+        // ranks below everything.
+        assert_eq!(drip_account_dots(&lines), vec!['r', 'y', 'g']);
     }
 
     #[test]
@@ -549,22 +556,23 @@ mod drip_accounts_tests {
         let lines = rail();
 
         // Everything fits: everything is drawn.
-        assert_eq!(drip_fit(&lines, 8), 8);
-        assert_eq!(drip_fit(&lines, 99), 8);
+        assert_eq!(drip_fit(&lines, 11), 11);
+        assert_eq!(drip_fit(&lines, 99), 11);
 
         // One row short of all three. Two accounts survive, and the blank that
         // was separating them from the third goes with it -- a rail must never
         // end on the spacer for something it did not draw.
-        assert_eq!(drip_fit(&lines, 7), 5);
+        assert_eq!(drip_fit(&lines, 10), 7);
         // Exactly two accounts and their separator: the cut lands on the blank
         // itself, which keeps the account above it whole.
-        assert_eq!(drip_fit(&lines, 5), 5);
-        // Room for two rows of the second account but not its opener: back off
-        // to the first account alone rather than draw a week with no account.
-        assert_eq!(drip_fit(&lines, 4), 2);
-        // Less than one whole account is nothing at all. Half an account is two
-        // numbers with nothing to say which window either belongs to.
-        assert_eq!(drip_fit(&lines, 1), 0);
+        assert_eq!(drip_fit(&lines, 7), 7);
+        // Room for the second account's hour and week but not its Fable row:
+        // back off to the first account alone rather than draw a group missing
+        // the row that says how much Fable is left.
+        assert_eq!(drip_fit(&lines, 6), 3);
+        // Less than one whole account is nothing at all. A partial account is
+        // numbers with nothing to say which window any of them belongs to.
+        assert_eq!(drip_fit(&lines, 2), 0);
     }
 
     #[test]
@@ -582,11 +590,11 @@ mod drip_accounts_tests {
         );
 
         // Tight enough that the third account does not fit. The rail asks for
-        // exactly what it will draw -- five rows, not eight -- so the agents
+        // exactly what it will draw -- seven rows, not eleven -- so the agents
         // get the difference back instead of the rail keeping an empty band.
-        let tight = drip_accounts_split(Rect::new(0, 0, 20, 15), &lines);
-        assert_eq!(tight.1.height, 5 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS);
-        assert_eq!(tight.0.height + tight.1.height, 15);
+        let tight = drip_accounts_split(Rect::new(0, 0, 20, 17), &lines);
+        assert_eq!(tight.1.height, 7 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS);
+        assert_eq!(tight.0.height + tight.1.height, 17);
 
         // Too short to give the rail one whole account without starving the
         // agents: the agent panel keeps the area and the rail draws nothing.

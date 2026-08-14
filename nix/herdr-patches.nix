@@ -10,10 +10,10 @@
 #   - One function over the herdr package, so every consumer (the
 #     nix-claude-drip herdr knob, a host pinning its own herdr build)
 #     applies the identical set: `herdr-drip.lib.patchHerdr herdrPkg`.
-#     The `rev` argument is NOT part of that contract — flake.nix applies it
-#     ahead of time (`import ./nix/herdr-patches.nix { rev = self.rev or null; }`),
-#     so what consumers hold stays the same one-argument function it was.
-#     Anything importing this file directly supplies its own rev, or none.
+#     The `rev`/`dirtyRev` arguments are NOT part of that contract — flake.nix
+#     applies them ahead of time (see `lib.patchHerdr` there), so what
+#     consumers hold stays the same one-argument function it was. Anything
+#     importing this file directly supplies its own revs, or none.
 #   - Every patch FAILS LOUDLY when upstream moves: `substituteInPlace
 #     --replace-fail` (or a context patch) errors the build rather than
 #     silently no-opping, so a herdr bump can never shed a patch without
@@ -27,22 +27,35 @@
 #     lets the module patch it.
 {
   rev ? null,
+  dirtyRev ? null,
 }:
 herdrPkg:
 let
   # The drip's own commit, for the sidebar-version patch below. Six chars is
   # what the user asked for and plenty to name a commit in a repo this size;
-  # `self.rev` is a full 40, and `self.shortRev` is 7, so neither is usable
-  # as-is. Rendered with a LEADING space so the empty case concatenates to
-  # exactly the old string rather than a trailing one.
+  # `self.rev` is a full 40, `self.shortRev` is 7, and `self.dirtyShortRev` is
+  # 7 plus a `-dirty` suffix, so none is usable as-is. Rendered with a LEADING
+  # space so the empty case concatenates to exactly the old string rather than
+  # a trailing one.
   #
-  # No rev means a dirty checkout — the same condition nix/plugins.nix warns
-  # about and skips its installs for. Here it degrades quietly instead: a
-  # working tree has no commit to name, and a build failure (or the word
-  # "dirty" in the chrome of every dev shell) would be a poor trade for
-  # information the developer already has. The header just reads " herdr
-  # 0.8.0", as it did before this patch learned about revs.
-  dripRev = if rev == null then "" else " " + builtins.substring 0 6 rev;
+  # A dirty tree gets the commit it SITS ON plus a trailing `*` — the git-prompt
+  # convention, and six columns cheaper than spelling the word. The mark is not
+  # decoration: the whole point of the header is answering "which build is
+  # this?", and a modified tree is precisely the case where the bare sha would
+  # answer it wrongly. `*` says "that commit, plus whatever was uncommitted at
+  # build time" — which is as much as any build off a working tree can honestly
+  # claim.
+  #
+  # Neither rev means a source with no git at all (a `path:` input, or a
+  # tarball). That degrades quietly to the stock-shaped " herdr 0.8.0": there
+  # is no commit to name and nothing to qualify, so there is nothing to say.
+  dripRev =
+    if rev != null then
+      " " + builtins.substring 0 6 rev
+    else if dirtyRev != null then
+      " " + builtins.substring 0 6 dirtyRev + "*"
+    else
+      "";
 in
 herdrPkg.overrideAttrs (old: {
   postPatch = (old.postPatch or "") + ''
@@ -54,16 +67,25 @@ herdrPkg.overrideAttrs (old: {
     # The drip's rev rides along, because the herdr version alone does not
     # identify what is on screen: the patches below can change the sidebar
     # while CARGO_PKG_VERSION sits still at 0.8.0, and then "which build is
-    # this?" has no answer anywhere in the UI. Two words, one line:
-    # `herdr 0.8.0 85c510`.
+    # this?" has no answer anywhere in the UI. Three tokens, one line:
+    # `󰖌 herdr 0.8.0 85c510`, and `85c510*` off a modified tree.
+    #
+    # The leading drop is nf-md-water (U+F058C) — the drip's mark, saying at a
+    # glance that this herdr is a PATCHED one and not stock. Written as a rust
+    # `\u{}` escape rather than the literal character for the same reason
+    # context-menu-items.rs does: the codepoint stays greppable against
+    # nerd-fonts' glyphnames.json, and it survives the nix-to-shell-to-source
+    # trip as plain ASCII. Note this is a Material Design Icon, which Nerd
+    # Fonts moved to the 5-digit U+F0001.. range in v2.3.0 — unlike the
+    # Codicons elsewhere in the set, a pre-v3 patched font renders it as tofu.
     #
     # It stays a `concat!` of literals, so the whole label is still resolved
     # at COMPILE time and the anchor keeps its shape — the rev arrives as a
     # nix interpolation into the replacement text, not as a runtime lookup.
     # The row is a 1-line Paragraph at the sidebar's full width (26 by
-    # default), so it truncates rather than wraps; 19 columns leaves room.
+    # default), so it truncates rather than wraps; 22 columns leaves room.
     substituteInPlace src/ui/sidebar.rs \
-      --replace-fail '" spaces",' 'concat!(" herdr ", env!("CARGO_PKG_VERSION"), "${dripRev}"),'
+      --replace-fail '" spaces",' 'concat!(" \u{f058c} herdr ", env!("CARGO_PKG_VERSION"), "${dripRev}"),'
 
     # sidebar-accounts: a rail under the agent list showing each Anthropic
     # account's headroom and reset — how much time is left, per account, where
@@ -113,6 +135,106 @@ herdrPkg.overrideAttrs (old: {
     # and this spot appears once.
     substituteInPlace src/ui/sidebar.rs \
       --replace-fail '    let detail_content_area = Rect::new(' '    drip_render_accounts_collapsed(app, frame, drip_accounts_rect(area, detail_area, 1), &drip_account_dots(&drip_accounts_lines())); let detail_content_area = Rect::new('
+
+    # sidebar-git-status: the workspace row's git_status token says what the
+    # claude-drip statusline says about the same checkout, and only that — the
+    # short HEAD hash and the added / modified / deleted counts, as bare
+    # coloured numbers with no glyph. Stock says one thing instead, `↑4 ↓1`, so
+    # a space could show "4 ahead" while the pane beside it showed "and 3 files
+    # uncommitted": two rows, one working tree, two vocabularies. The token now
+    # speaks the pane's. herdr's arrows are not restyled or folded in, they are
+    # gone — see the zeroed pair below. See sidebar-git-status.rs for the
+    # layout, the colours and what the counts cost.
+    #
+    # No plugin surface reaches it: a plugin's `$token` is one string with one
+    # style, so it cannot paint three counts in three colours, and nothing in
+    # the plugin API can add a field to a sidebar token's data or to how one is
+    # measured.
+    cat ${./sidebar-git-status.rs} >> src/ui/sidebar.rs
+
+    # The token needs to know WHICH checkout it is describing, which the token
+    # context does not carry — ahead/behind arrives already computed, so no
+    # consumer has ever needed the path. One field, and one line to fill it.
+    #
+    # The second anchor matches TWICE on purpose (the check script says so):
+    # herdr builds this context in two places, `workspace_row_height` and the
+    # renderer, and a row measured without the counts and drawn with them is a
+    # clipped row. Both sites have `ws` in scope and want the identical value,
+    # so one substitution is the honest way to say "both".
+    substituteInPlace src/ui/sidebar/tokens.rs \
+      --replace-fail '    pub suppress_git_details: bool,' '    pub suppress_git_details: bool, pub drip_repo: Option<std::path::PathBuf>,'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail 'ahead_behind: ws.git_ahead_behind(),' 'ahead_behind: ws.git_ahead_behind(), drip_repo: drip_workspace_repo(ws),'
+
+    # The details ride ON the existing token rather than beside it, because a
+    # token is what the row's width budget is computed from: a separate token
+    # would be measured, separated (` · `) and truncated on its own terms, and
+    # `a1c3 · 3 · 2 · 1` is not what either row says today.
+    substituteInPlace src/ui/sidebar/tokens.rs \
+      --replace-fail '    GitStatus { ahead: usize, behind: usize },' '    GitStatus { ahead: usize, behind: usize, drip: super::DripGitDetails },'
+
+    # ...and the token has to SURVIVE a repo that is level with its upstream,
+    # which stock drops on the floor (`filter(ahead > 0 || behind > 0)`) — the
+    # case where the counts are the only thing left to say, and the one the
+    # request came from. `or(Some((0, 0)))` supplies the pair the rest of the
+    # chain destructures; the added disjunct is what keeps the token alive.
+    #
+    # Stock's two disjuncts are left in rather than replaced. They no longer
+    # decide anything visible — nothing draws arrows now — so all they can do
+    # is keep an EMPTY token alive for the frame or two between a workspace
+    # appearing and its first `git status` landing, where herdr's cached
+    # ahead/behind is already known and the drip's cache is still cold. That
+    # costs one space at the end of a row nobody is looking at yet, and it is
+    # cheaper than a filter that says something different from what upstream's
+    # says for a reason a reader would have to reconstruct.
+    substituteInPlace src/ui/sidebar/tokens.rs \
+      --replace-fail '.filter(|(ahead, behind)| *ahead > 0 || *behind > 0)' '.or(Some((0, 0))).filter(|(ahead, behind)| *ahead > 0 || *behind > 0 || !super::drip_git_details_for(context.drip_repo.as_deref()).is_empty())'
+
+    # ...and the ahead/behind pair is DROPPED on the way into the token, which
+    # is how herdr's `↑6` stops being drawn. The arrow is herdr's answer to a
+    # question the statusline does not ask, and the row it shares is the
+    # statusline's row; two dialects in nineteen columns is what this patch
+    # exists to end, so the drip's pieces are not joined by an arrow, they
+    # REPLACE it.
+    #
+    # Zeroing the pair at construction rather than deleting herdr's arrow code
+    # is deliberate. That code is three `if`s and about twenty lines in the
+    # renderer plus three terms in the measurer, and unpicking it would mean
+    # twenty anchors that break on any upstream reflow, to delete something
+    # that `ahead: 0, behind: 0` already makes provably unreachable: every one
+    # of those branches tests a constant zero, and every one of those terms
+    # multiplies by `usize::from(false)`. One anchor, and stock's arrow code is
+    # free to move, be rewritten or be deleted upstream without touching this.
+    #
+    # herdr still COMPUTES ahead/behind for this token (the `git_status` token
+    # is what sets `demand.ahead_behind`, and the refresh runs off the render
+    # path either way). Turning that off is a different anchor and a different
+    # story; this one is only about what the row says.
+    substituteInPlace src/ui/sidebar/tokens.rs \
+      --replace-fail '.map(|(ahead, behind)| ResolvedTokenKind::GitStatus { ahead, behind }),' '.map(|_| ResolvedTokenKind::GitStatus { ahead: 0, behind: 0, drip: super::drip_git_details_for(context.drip_repo.as_deref()) }),'
+
+    # Bind the new field in both arms that match the token — the one that
+    # measures it and the one that paints it. Two occurrences, one meaning.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail 'ResolvedTokenKind::GitStatus { ahead, behind } => {' 'ResolvedTokenKind::GitStatus { ahead, behind, drip } => {'
+
+    # Measure, then paint, by ADDING a term to stock's sum and a push before
+    # stock's first — not by rewriting either arm. Stock's three terms and
+    # three `if`s stay exactly as upstream wrote them and, fed the zeroed pair
+    # above, contribute 0 and draw nothing, so the drip's term is the whole
+    # width and the drip's spans are the whole token. Each anchor is one line,
+    # so a herdr that reflows the arrow code fails neither of them, and the
+    # only thing that fails the build is a herdr that MOVES these two lines.
+    #
+    # The row therefore reads `<branch> <hash> <a> <m> <d>` — character for
+    # character the leading run of the claude-drip statusline, and nothing
+    # after it.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '                    + usize::from(*ahead > 0 && *behind > 0)' '                    + usize::from(*ahead > 0 && *behind > 0) + drip_git_status_width(drip)'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '                if *ahead > 0 {' '                spans.extend(drip_git_status_spans(drip, secondary_style, p, token.style)); if *ahead > 0 {'
 
     # last-close-quits: closing the last pane stops the server, instead of
     # leaving an empty herdr running. Stock herdr treats "no workspaces left"

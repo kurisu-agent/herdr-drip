@@ -58,13 +58,22 @@
       # applies the identical set; see nix/herdr-patches.nix for the rules
       # (fail-loudly, one story per patch, never apply twice).
       #
-      # `rev` is bound HERE rather than by the caller, so `patchHerdr` stays
-      # the one-argument function every consumer already applies
+      # The revs are bound HERE rather than by the caller, so `patchHerdr`
+      # stays the one-argument function every consumer already applies
       # (nix-claude-drip's herdr knob, drift-rust's guest tools) and the
       # sidebar's version line still names the drip that patched it. Same
-      # source as the plugin pin below, and the same dirty-checkout story: no
-      # rev, no hash in the header.
-      lib.patchHerdr = import ./nix/herdr-patches.nix { rev = self.rev or null; };
+      # source as the plugin pin below.
+      #
+      # Both are passed because only one of them ever exists: a clean checkout
+      # has `rev` and no `dirtyShortRev`, a dirty one has the reverse, and a
+      # non-git source (`path:`) has neither. That is also why the dirty case
+      # cannot reuse `rev` — a build off a modified tree is not the commit it
+      # sits on, and naming that commit unqualified would be a lie the header
+      # exists to prevent. herdr-patches.nix marks it instead; see dripRev.
+      lib.patchHerdr = import ./nix/herdr-patches.nix {
+        rev = self.rev or null;
+        dirtyRev = self.dirtyShortRev or null;
+      };
 
       nixosModules = rec {
         # For NixOS hosts running nix-claude-drip (services.claude-code):
