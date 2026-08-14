@@ -294,6 +294,7 @@ in
     plugins = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [
+        "agent-scope"
         "flip-split"
         "gumbo-usage"
         "pane-titles"

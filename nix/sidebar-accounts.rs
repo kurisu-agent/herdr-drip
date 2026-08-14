@@ -29,10 +29,13 @@ const DRIP_AGENT_PANEL_FLOOR: u16 = AGENT_PANEL_HEADER_ROWS + 2;
 /// of them visible before the accounts get any space at all.
 const DRIP_COLLAPSED_AGENT_FLOOR: u16 = 2;
 
-/// Rows above the first account: the separator, the `accounts` title, and a
-/// blank line under it so the title reads as a title rather than as the first
-/// entry of the list.
-const DRIP_HEADER_ROWS: u16 = 3;
+/// Rows above the first account: the separator alone. The rail used to spend
+/// two more here -- an `accounts` title and a blank line under it -- but the
+/// rows say what they are (a percent, a reset clock, a traffic-light dot),
+/// and under the drip's quiet-chrome patch every section label went; the
+/// separator is the whole announcement, as it is between the workspace list
+/// and the agents.
+const DRIP_HEADER_ROWS: u16 = 1;
 
 /// One row kept BELOW the last account, so the rail does not sit flush on the
 /// bottom edge of the sidebar. It is breathing room first, but it is also
@@ -254,12 +257,15 @@ pub(crate) fn drip_accounts_split(detail: Rect, lines: &[DripAccountLine]) -> (R
     if lines.is_empty() || detail.width == 0 {
         return (detail, Rect::default());
     }
-    // A separator, a header, a blank line, then the rows, then one blank row
-    // under them. The blank above is not decoration: without it the first
-    // account's row reads as part of the header, the same way the agent list
-    // gets one. The blank BELOW is carved here but never drawn -- the rail's
-    // rect stops short of it (`drip_accounts_rect`'s `reserved`), so it is
-    // taken from the agent panel exactly once rather than eating an account.
+    // A separator, then the rows, then one blank row under them. The rail used
+    // to spend two more rows above -- a title and a blank under it -- and the
+    // blank was load-bearing while the title was there, keeping the first
+    // account from reading as part of it. With no title there is nothing for
+    // the first row to run into, so the separator alone opens the rail, the
+    // way it separates the workspace list from the agents. The blank BELOW is
+    // carved here but never drawn -- the rail's rect stops short of it
+    // (`drip_accounts_rect`'s `reserved`), so it is taken from the agent panel
+    // exactly once rather than eating an account.
     //
     // What is left after the agents' floor and this chrome is the rows the
     // accounts may have, and [`drip_fit`] decides how many of them are worth
@@ -282,10 +288,10 @@ pub(crate) fn drip_accounts_split(detail: Rect, lines: &[DripAccountLine]) -> (R
     )
 }
 
-/// Draw the rail: a separator, an `accounts` header, then the rows in their own
-/// colours. Shaped like [`render_agent_detail`]'s header on purpose -- under
-/// the agent list it should read as the next section of one list, not as a
-/// widget someone bolted on.
+/// Draw the rail: a separator, then the rows in their own colours. Shaped
+/// like [`render_agent_detail`]'s section break on purpose -- under the agent
+/// list it should read as the next section of one list, not as a widget
+/// someone bolted on.
 pub(crate) fn drip_render_accounts(
     app: &AppState,
     frame: &mut Frame,
@@ -302,13 +308,6 @@ pub(crate) fn drip_render_accounts(
             Style::default().fg(p.surface_dim),
         )),
         Rect::new(area.x, area.y, area.width, 1),
-    );
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            " accounts",
-            Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
-        )),
-        Rect::new(area.x, area.y + 1, area.width, 1),
     );
 
     let body = Rect::new(
@@ -587,7 +586,7 @@ mod drip_accounts_tests {
         assert!(tall.0.height >= DRIP_AGENT_PANEL_FLOOR);
         // Whatever the split, the two halves tile the area they came from.
         assert_eq!(tall.0.height + tall.1.height, 40);
-        // Separator, title, blank, one row per line, then the footer blank.
+        // Separator, one row per line, then the footer blank.
         assert_eq!(
             tall.1.height,
             lines.len() as u16 + DRIP_HEADER_ROWS + DRIP_FOOTER_ROWS
