@@ -1,0 +1,31 @@
+id = "drip.agent-scope"
+name = "Agent scope"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "The sidebar's agent list shows this space's agents; a toggle widens it to every space"
+platforms = ["linux", "macos"]
+
+# Herdr does not persist an agent view across a restart, so the scope is
+# re-applied on every session restore — which is also what makes
+# this-space-only the DEFAULT: a server that has never seen this plugin has no
+# state file, and `apply` reads that as `current`.
+[[startup]]
+command = ["bin/scope", "apply"]
+
+[[actions]]
+id = "toggle"
+title = "Agents: this space / every space"
+contexts = ["workspace"]
+command = ["bin/scope", "toggle"]
+
+[[actions]]
+id = "current"
+title = "Agents: only this space"
+contexts = ["workspace"]
+command = ["bin/scope", "current"]
+
+[[actions]]
+id = "all"
+title = "Agents: every space"
+contexts = ["workspace"]
+command = ["bin/scope", "all"]

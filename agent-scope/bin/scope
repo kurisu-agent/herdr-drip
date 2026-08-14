@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Which agents the sidebar's agent panel lists: this space's, or every one.
+#
+#   scope apply     re-assert whatever is stored (the [[startup]] hook)
+#   scope toggle    flip it and re-assert
+#   scope current   only the space you are looking at (the default)
+#   scope all       every space, herdr's stock behaviour
+#
+# The scope is one word in the plugin's state dir, so a toggle survives the
+# next toggle, a `herdr server reload-config`, and a restart -- the startup
+# hook reads it back. No file means `current`: the default is the absence of
+# state, not a value written at install time.
+set -euo pipefail
+
+mode=${1:-toggle}
+state_dir=${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr/plugins/drip.agent-scope}
+state_file=$state_dir/scope
+root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+
+stored=current
+if [[ -r $state_file ]]; then
+  read -r stored <"$state_file" || stored=current
+fi
+[[ $stored == all ]] || stored=current
+
+case $mode in
+  apply) desired=$stored ;;
+  toggle) desired=$([[ $stored == current ]] && echo all || echo current) ;;
+  current | all) desired=$mode ;;
+  *)
+    echo "usage: scope [apply|toggle|current|all]" >&2
+    exit 2
+    ;;
+esac
+
+# bun is the drip's declared runtime dep (flake.nix#herdr-drip-deps) and the
+# only interpreter on the herdr server's PATH that speaks unix sockets --
+# there is no `herdr agent view` CLI verb to shell out to, the agent view is
+# API-only. A host without it gets no scope change and one line saying so,
+# the same way gumbo-usage degrades when gumbo is missing.
+if ! command -v bun >/dev/null 2>&1; then
+  echo "bun is not on the herdr server's PATH; agent scope unchanged" >&2
+  exit 0
+fi
+
+# The state is written BEFORE the call so a toggle that herdr rejects still
+# lands somewhere legible, and the next `apply` re-tries it rather than
+# silently reverting to a scope the user did not pick.
+mkdir -p -- "$state_dir"
+printf '%s\n' "$desired" >"$state_file"
+
+exec bun "$root/bin/agent-view.js" "$desired"

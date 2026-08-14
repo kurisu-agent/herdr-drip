@@ -66,6 +66,7 @@ rec {
   # is deliberately not in nix/plugins.nix's default list, but it builds like
   # any other — it is what to link when testing this machinery.
   all = lib.genAttrs [
+    "agent-scope"
     "flip-split"
     "gumbo-usage"
     "hello"

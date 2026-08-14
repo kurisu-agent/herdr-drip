@@ -42,7 +42,8 @@ herdr plugin log list --plugin drip.hello
 
 `config/herdr.toml` is the drip's curated herdr config — keybindings layered
 under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Ctrl+b [` to flip a split,
-`Alt+Shift+arrows` for pane focus), sidebar rows wired to the plugins'
+`Ctrl+b a` to widen or narrow the agent list, `Alt+Shift+arrows` for pane
+focus), sidebar rows wired to the plugins'
 `$worktree` token, a tab bar that hides itself while there is only one tab
 (`hide_tab_bar_when_single_tab` — one tab is not a choice, so the row showing
 it is a line of terminal spent on nothing), the colour scheme (below), and the
@@ -438,8 +439,6 @@ Under the agent list, one rail per Anthropic account: a traffic-light dot, the
 
 ```
 ──────────────────────
- accounts
-
 ▸● hext2   ▰▰▱▱▱  11m
         7d ▰▰▰▰▱   5d
  ● hext3   ▱▱▱▱▱ 3h31
@@ -539,6 +538,15 @@ same way the plugin directories curate everything else. Current set:
 - **single-pane-borders** — a lone pane keeps its frame. Not the
   `ui.pane_borders` setting, which is already on: herdr ANDs it with a
   hardcoded `pane_count() > 1`. See below.
+- **sidebar-quiet-chrome** — the sidebar's section labels go: `new` and `menu`
+  under the workspace list, `agents` over the agent panel, and the
+  `grouped`/`priority` tag in its corner. Each names something the rows below
+  it already show, and a 26-column sidebar has no columns to spend on
+  captions. Every one is a string literal in the renderer, so no plugin can
+  reach them. See below.
+- **sidebar-auto-split** — the divider between the workspace list and the
+  agent panel follows the list instead of a dragged ratio, so opening and
+  closing spaces resizes both sections on its own. See below.
 
 They apply as one function, so every host gets the identical set:
 
@@ -778,6 +786,122 @@ for a lone pane — `pane_to_right`/`pane_below` find no neighbour, and the gap
 shrink is keyed on having found one. The one use that is not about chrome is
 `should_dim`, which greys *unfocused* panes; with one pane in the layout that
 pane is the focused one, so it cannot fire either.
+
+### sidebar-quiet-chrome: the sidebar stops narrating itself
+
+Five words the sidebar repeated at you every frame, each naming something the
+rows under it already show:
+
+| Label | Where | What it named |
+| --- | --- | --- |
+| `new` | footer, left | the `+` you already clicked |
+| `menu` | footer, right | the launcher you already clicked |
+| `agents` | over the agent panel | a list of agents |
+| `grouped` / `priority` | agent panel corner | the sort, which the order shows |
+| `accounts` | over the accounts rail | rows of percents and reset clocks |
+
+A 26-column sidebar has no columns to spend on captions, and none of these is
+reachable from a plugin — they are `&'static str` literals in
+`src/ui/sidebar.rs` (the last one in our own `sidebar-accounts.rs`, where it
+cost the rail two rows: the title and the blank line under it).
+
+**Only what is drawn changes; every rect stays.** The click targets are
+computed by separate geometry functions — `sidebar_new_button_rect`,
+`global_launcher_rect`, `agent_panel_toggle_rect` — and those are untouched,
+so the footer zones still work and the corner still cycles the sort when
+clicked. That asymmetry is also what keeps herdr's own tests green:
+`clicking_agent_panel_toggle_switches_sort` clicks the rect the geometry
+function returns, not the pixels. The menu's attention dot survives its label:
+`●` is a signal, not chrome.
+
+The agent-view label goes too, and has to — **drip.agent-scope** below keeps a
+view active permanently, so the corner would otherwise read `filtered` on
+every frame forever, in the cell the sort label just vacated. The blanking is
+of the *fallback*, so a view that sets a real label can still say so.
+
+### sidebar-auto-split: the divider follows the list
+
+Stock herdr sizes the two sidebar sections from `sidebar_section_split`, a
+ratio you drag and the session persists. Nothing updates it, so every space
+opened or closed leaves it where it was: the workspace list scrolls under a
+half-empty agent panel, or crowds it out, until someone drags the divider
+back. The number it should hold is not a preference — it is however many rows
+the list needs, and the list already knows.
+
+`drip_auto_section_split` (`nix/sidebar-auto-split.rs`) computes exactly that:
+each entry's `workspace_row_height` plus its `workspace_entry_gap`, under the
+two header rows and above the one footer row, mirroring the arithmetic in
+`compute_workspace_list_areas`. One write in `compute_view_internal` plants it
+in `app.sidebar_section_split` **before any geometry is derived**, so the
+renderer, the click hit-testing and the scroll metrics all read the same value
+they always did and stay consistent for free.
+
+No plugin can do this: the ratio is an `AppState` field, and the sidebar has
+no plugin surface at all.
+
+**Dragging is retired by consequence, not by surgery.** The divider's hit test
+and its setter are left exactly as they are — herdr's
+`dragging_sidebar_section_divider_sets_split_ratio` drives them directly and
+still passes — but the next view pass recomputes the field, so a drag never
+survives to a drawn frame. That is the cheapest honest way to disable the
+gesture; unpicking the mouse path would mean rewriting code herdr tests.
+
+Two clamps matter and both stay: `sidebar_section_heights` keeps each section
+at least 3 rows, so a list longer than the sidebar simply scrolls (exactly as
+a stock sidebar too short for its list does), and below 6 rows it ignores the
+ratio entirely, so the computation returns the current value untouched rather
+than churning a field nobody reads. The ratio guard itself widens from
+`(0.1, 0.9)` to `(0.0, 1.0)` — a three-space list on a tall sidebar should not
+be forced to hold a tenth of it.
+
+## agent-scope: the agent list is about this space
+
+The sidebar's agent panel lists every agent in every space, which on a host
+with a dozen spaces is a list you scroll rather than read. This plugin makes
+it show the space you are looking at, and gives you one key to widen it:
+
+```
+Ctrl+b a                                             # toggle
+herdr plugin action invoke toggle --plugin drip.agent-scope
+herdr plugin action invoke current --plugin drip.agent-scope
+herdr plugin action invoke all --plugin drip.agent-scope
+```
+
+**This one is a real plugin, not a patch** — herdr has an API for exactly
+this. `agent.view.set` takes a filter, and
+
+```json
+{"op": "eq", "field": "workspace_id", "value": {"context": "current_workspace_id"}}
+```
+
+is resolved by herdr *on every render*, against the workspace being presented
+(the active one, or the selected one while navigating). So the plugin is
+invoked once and the panel follows your focus from then on. `all` does not set
+a filter that matches everything; it **clears** the view, because an inactive
+view is stock behaviour, which is what "every space" means.
+
+The scope is one word under `$HERDR_PLUGIN_STATE_DIR`, so a toggle survives
+the next toggle and a restart. herdr does not persist an agent view, so
+`[[startup]]` re-applies it after each session restore — which is also what
+makes this-space-only the **default**: a server that has never seen this
+plugin has no state file, and `apply` reads that as `current`.
+
+Two details worth knowing:
+
+- **It speaks the socket, not the CLI.** There is no `herdr agent view` verb —
+  the agent view is API-only — so `bin/agent-view.js` writes one JSON line to
+  the socket herdr hands every plugin command in `$HERDR_SOCKET_PATH`. That is
+  `bun`, already a declared drip dependency (`flake.nix#herdr-drip-deps`) and
+  the only interpreter on the server's PATH that speaks unix sockets. A host
+  without it gets one line on stderr and an unchanged scope, the way
+  gumbo-usage degrades without gumbo. There is no `[[build]]` — no
+  node_modules, just the runtime.
+- **The view is owned, and herdr knows it.** The source is
+  `plugin:drip.agent-scope`, which herdr validates against the installed
+  plugin list and clears on its own if the plugin is disabled or removed —
+  so a disabled plugin cannot leave your agent panel filtered with nothing
+  left to unfilter it. `all` clears only that source, never a view another
+  plugin set.
 
 ## Adding a plugin
 

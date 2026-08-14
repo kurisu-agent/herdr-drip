@@ -29,10 +29,13 @@ const DRIP_AGENT_PANEL_FLOOR: u16 = AGENT_PANEL_HEADER_ROWS + 2;
 /// of them visible before the accounts get any space at all.
 const DRIP_COLLAPSED_AGENT_FLOOR: u16 = 2;
 
-/// Rows above the first account: the separator, the `accounts` title, and a
-/// blank line under it so the title reads as a title rather than as the first
-/// entry of the list.
-const DRIP_HEADER_ROWS: u16 = 3;
+/// Rows above the first account: the separator alone. The rail used to spend
+/// two more here -- an `accounts` title and a blank line under it -- but the
+/// rows say what they are (a percent, a reset clock, a traffic-light dot),
+/// and under the drip's quiet-chrome patch every section label went; the
+/// separator is the whole announcement, as it is between the workspace list
+/// and the agents.
+const DRIP_HEADER_ROWS: u16 = 1;
 
 /// One row kept BELOW the last account, so the rail does not sit flush on the
 /// bottom edge of the sidebar. It is breathing room first, but it is also
@@ -281,10 +284,10 @@ pub(crate) fn drip_accounts_split(detail: Rect, lines: &[DripAccountLine]) -> (R
     )
 }
 
-/// Draw the rail: a separator, an `accounts` header, then the rows in their own
-/// colours. Shaped like [`render_agent_detail`]'s header on purpose -- under
-/// the agent list it should read as the next section of one list, not as a
-/// widget someone bolted on.
+/// Draw the rail: a separator, then the rows in their own colours. Shaped
+/// like [`render_agent_detail`]'s section break on purpose -- under the agent
+/// list it should read as the next section of one list, not as a widget
+/// someone bolted on.
 pub(crate) fn drip_render_accounts(
     app: &AppState,
     frame: &mut Frame,
@@ -301,13 +304,6 @@ pub(crate) fn drip_render_accounts(
             Style::default().fg(p.surface_dim),
         )),
         Rect::new(area.x, area.y, area.width, 1),
-    );
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            " accounts",
-            Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
-        )),
-        Rect::new(area.x, area.y + 1, area.width, 1),
     );
 
     let body = Rect::new(

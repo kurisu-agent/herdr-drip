@@ -412,5 +412,77 @@ herdrPkg.overrideAttrs (old: {
 
     substituteInPlace src/ui/panes.rs \
       --replace-fail '.border_style(Style::default().fg(app.palette.accent))' '.border_style(Style::default().fg(app.palette.accent)).border_type(ratatui::widgets::BorderType::Rounded)'
+
+    # sidebar-quiet-chrome: the sidebar's section labels go. Five words the
+    # sidebar repeats at you every frame — `new` and `menu` under the
+    # workspace list, `agents` over the agent panel, `grouped`/`priority` in
+    # its corner (and the accounts rail's `accounts`, retired in
+    # sidebar-accounts.rs itself) — each naming something the rows beneath
+    # already show. A 26-column sidebar has no room for captions, and no
+    # plugin can reach any of them: they are string literals in the renderer.
+    #
+    # Every substitution below empties what is DRAWN and leaves every rect the
+    # hit-testing reads untouched, so the click targets stay exactly where
+    # they were: the footer's new/menu zones still work (they were only
+    # visible on hover — mouse_capture — anyway), and the sort toggle keeps
+    # the corner rect `agent_panel_toggle_rect` computes from the real label.
+    # That asymmetry is deliberate and is what keeps herdr's own tests green —
+    # clicking_agent_panel_toggle_switches_sort clicks the rect the GEOMETRY
+    # function returns, not the pixels. The menu badge dot survives its label:
+    # `●` is an attention signal, not chrome.
+    #
+    # The agent-view label goes with them, and has to: drip.agent-scope keeps
+    # a view active permanently (this space's agents, its default), so the
+    # corner would read `filtered` on every frame forever — the same caption
+    # in the same cell the sort label just vacated. Blanking the fallback
+    # rather than the whole expression leaves a LABELLED view able to say so,
+    # which is the case where the word is worth its columns.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail 'Paragraph::new(Span::styled(" new", Style::default().fg(p.overlay0))),' 'Paragraph::new(Span::styled("", Style::default().fg(p.overlay0))),'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail 'Span::styled("menu", Style::default().fg(p.overlay0)),' 'Span::styled("", Style::default().fg(p.overlay0)),'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail 'Line::from(vec![Span::styled("menu", Style::default().fg(p.overlay0))])' 'Line::from(vec![Span::styled("", Style::default().fg(p.overlay0))])'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '            " agents",' '            "",'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '        .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));' '        .unwrap_or("");'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '.map(|view| view.label.as_deref().unwrap_or("filtered"))' '.map(|view| view.label.as_deref().unwrap_or(""))'
+
+    # sidebar-auto-split: the workspace/agent divider follows the workspace
+    # list instead of a dragged ratio. Stock herdr persists
+    # `sidebar_section_split` and leaves it wherever the last drag put it, so
+    # every workspace opened or closed either scrolls the list under empty
+    # agent rows or floats it over them until someone drags the divider back.
+    # The right value is not an opinion — it is however many rows the list
+    # needs — and no plugin can reach it: the ratio is an AppState field the
+    # renderer, hit-testing and scroll metrics all read.
+    #
+    # drip_auto_section_split (sidebar-auto-split.rs) computes that ratio, and
+    # the ONE write below plants it in compute_view_internal before any
+    # geometry is derived, so every consumer reads the same value they always
+    # did. It writes the field rather than bypassing it so the whole pipeline
+    # — including the persisted snapshot — stays coherent.
+    #
+    # Dragging is retired by consequence, not by surgery: the divider's hit
+    # test and setter are untouched (herdr's drag test drives them directly),
+    # but the next view pass recomputes the field, so a drag never survives to
+    # a drawn frame. The clamp relaxation widens `sidebar_section_heights`'s
+    # ratio guard from (0.1, 0.9) to (0.0, 1.0) so a short list on a tall
+    # sidebar is not forced to hold 10% of it; the function's own 3-row
+    # min/max clamps still keep both sections alive at every height.
+    cat ${./sidebar-auto-split.rs} >> src/ui/sidebar.rs
+
+    substituteInPlace src/ui.rs \
+      --replace-fail '        app.workspace_scroll = normalized_workspace_scroll(app, sidebar_area, app.workspace_scroll);' '        app.sidebar_section_split = sidebar::drip_auto_section_split(app, sidebar_area); app.workspace_scroll = normalized_workspace_scroll(app, sidebar_area, app.workspace_scroll);'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    let ratio = split_ratio.clamp(0.1, 0.9);' '    let ratio = split_ratio.clamp(0.0, 1.0);'
   '';
 })

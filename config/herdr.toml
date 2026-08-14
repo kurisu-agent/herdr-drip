@@ -117,6 +117,15 @@ key = "prefix+["
 command = "herdr plugin action invoke flip --plugin drip.flip-split"
 description = "flip split orientation"
 
+# Ctrl+b a — the agent panel lists this space's agents (the default) or every
+# space's. A free key in both herdr's defaults and this file, and the toggle
+# needs one: an action's `contexts` are advisory in 0.8.0, so a plugin action
+# reaches the palette and the keybindings but never herdr's own menus.
+[[keys.command]]
+key = "prefix+a"
+command = "herdr plugin action invoke toggle --plugin drip.agent-scope"
+description = "agents: this space / every space"
+
 [experimental]
 kitty_graphics = true
 pane_history = true
