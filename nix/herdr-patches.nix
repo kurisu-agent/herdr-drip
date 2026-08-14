@@ -10,10 +10,10 @@
 #   - One function over the herdr package, so every consumer (the
 #     nix-claude-drip herdr knob, a host pinning its own herdr build)
 #     applies the identical set: `herdr-drip.lib.patchHerdr herdrPkg`.
-#     The `rev` argument is NOT part of that contract — flake.nix applies it
-#     ahead of time (`import ./nix/herdr-patches.nix { rev = self.rev or null; }`),
-#     so what consumers hold stays the same one-argument function it was.
-#     Anything importing this file directly supplies its own rev, or none.
+#     The `rev`/`dirtyRev` arguments are NOT part of that contract — flake.nix
+#     applies them ahead of time (see `lib.patchHerdr` there), so what
+#     consumers hold stays the same one-argument function it was. Anything
+#     importing this file directly supplies its own revs, or none.
 #   - Every patch FAILS LOUDLY when upstream moves: `substituteInPlace
 #     --replace-fail` (or a context patch) errors the build rather than
 #     silently no-opping, so a herdr bump can never shed a patch without
@@ -27,22 +27,35 @@
 #     lets the module patch it.
 {
   rev ? null,
+  dirtyRev ? null,
 }:
 herdrPkg:
 let
   # The drip's own commit, for the sidebar-version patch below. Six chars is
   # what the user asked for and plenty to name a commit in a repo this size;
-  # `self.rev` is a full 40, and `self.shortRev` is 7, so neither is usable
-  # as-is. Rendered with a LEADING space so the empty case concatenates to
-  # exactly the old string rather than a trailing one.
+  # `self.rev` is a full 40, `self.shortRev` is 7, and `self.dirtyShortRev` is
+  # 7 plus a `-dirty` suffix, so none is usable as-is. Rendered with a LEADING
+  # space so the empty case concatenates to exactly the old string rather than
+  # a trailing one.
   #
-  # No rev means a dirty checkout — the same condition nix/plugins.nix warns
-  # about and skips its installs for. Here it degrades quietly instead: a
-  # working tree has no commit to name, and a build failure (or the word
-  # "dirty" in the chrome of every dev shell) would be a poor trade for
-  # information the developer already has. The header just reads " herdr
-  # 0.8.0", as it did before this patch learned about revs.
-  dripRev = if rev == null then "" else " " + builtins.substring 0 6 rev;
+  # A dirty tree gets the commit it SITS ON plus a trailing `*` — the git-prompt
+  # convention, and six columns cheaper than spelling the word. The mark is not
+  # decoration: the whole point of the header is answering "which build is
+  # this?", and a modified tree is precisely the case where the bare sha would
+  # answer it wrongly. `*` says "that commit, plus whatever was uncommitted at
+  # build time" — which is as much as any build off a working tree can honestly
+  # claim.
+  #
+  # Neither rev means a source with no git at all (a `path:` input, or a
+  # tarball). That degrades quietly to the stock-shaped " herdr 0.8.0": there
+  # is no commit to name and nothing to qualify, so there is nothing to say.
+  dripRev =
+    if rev != null then
+      " " + builtins.substring 0 6 rev
+    else if dirtyRev != null then
+      " " + builtins.substring 0 6 dirtyRev + "*"
+    else
+      "";
 in
 herdrPkg.overrideAttrs (old: {
   postPatch = (old.postPatch or "") + ''
@@ -54,16 +67,25 @@ herdrPkg.overrideAttrs (old: {
     # The drip's rev rides along, because the herdr version alone does not
     # identify what is on screen: the patches below can change the sidebar
     # while CARGO_PKG_VERSION sits still at 0.8.0, and then "which build is
-    # this?" has no answer anywhere in the UI. Two words, one line:
-    # `herdr 0.8.0 85c510`.
+    # this?" has no answer anywhere in the UI. Three tokens, one line:
+    # `󰖌 herdr 0.8.0 85c510`, and `85c510*` off a modified tree.
+    #
+    # The leading drop is nf-md-water (U+F058C) — the drip's mark, saying at a
+    # glance that this herdr is a PATCHED one and not stock. Written as a rust
+    # `\u{}` escape rather than the literal character for the same reason
+    # context-menu-items.rs does: the codepoint stays greppable against
+    # nerd-fonts' glyphnames.json, and it survives the nix-to-shell-to-source
+    # trip as plain ASCII. Note this is a Material Design Icon, which Nerd
+    # Fonts moved to the 5-digit U+F0001.. range in v2.3.0 — unlike the
+    # Codicons elsewhere in the set, a pre-v3 patched font renders it as tofu.
     #
     # It stays a `concat!` of literals, so the whole label is still resolved
     # at COMPILE time and the anchor keeps its shape — the rev arrives as a
     # nix interpolation into the replacement text, not as a runtime lookup.
     # The row is a 1-line Paragraph at the sidebar's full width (26 by
-    # default), so it truncates rather than wraps; 19 columns leaves room.
+    # default), so it truncates rather than wraps; 22 columns leaves room.
     substituteInPlace src/ui/sidebar.rs \
-      --replace-fail '" spaces",' 'concat!(" herdr ", env!("CARGO_PKG_VERSION"), "${dripRev}"),'
+      --replace-fail '" spaces",' 'concat!(" \u{f058c} herdr ", env!("CARGO_PKG_VERSION"), "${dripRev}"),'
 
     # sidebar-accounts: a rail under the agent list showing each Anthropic
     # account's headroom and reset — how much time is left, per account, where
