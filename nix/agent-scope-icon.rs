@@ -135,3 +135,81 @@ impl AppState {
         self.mobile_switcher_scroll = 0;
     }
 }
+
+/// Does this entry belong to the same REPO FAMILY as the workspace on screen?
+///
+/// herdr models a worktree as a sibling workspace, not as a child of the repo
+/// it came from: `beads-ui` and its `graph-view`, `epic-tree`, `health-panel`
+/// worktrees are four workspaces that share nothing but a
+/// `WorktreeSpaceMembership`. So "this space's agents", filtered by workspace
+/// id, can never reach a worktree's agents from the repo row or the other way
+/// round -- and a repo row is exactly where you stand when you want to see
+/// what all of its worktrees are doing.
+///
+/// This widens the comparison for our own view only, and only for the one
+/// shape our view uses: it says yes when both sides are in the same family,
+/// and the caller falls back to stock id equality for everything else. Which
+/// is what keeps the promise that a workspace with no worktree record behaves
+/// exactly as it did -- no membership, no widening, plain id match.
+///
+/// The key is `repo_key` rather than `repo_root` because it is the one herdr
+/// ITSELF groups on: `space.key` is what the sidebar's own worktree grouping,
+/// its collapse state (`collapsed_space_keys`) and its aggregate status all
+/// compare. Matching anything else would mean an agent list that groups on a
+/// different rule than the workspace list right above it, and those two
+/// disagreeing is worse than either rule being wrong. It is also the more
+/// precise of the two: herdr fills it from the repo's `.git` path, which is
+/// one identity for the main checkout and every linked worktree of it, while
+/// `repo_root` is a plain directory path that a second clone elsewhere could
+/// coincide with.
+///
+/// Both directions come free: membership is symmetric, so this answers the
+/// same for (repo, worktree) as for (worktree, sibling worktree).
+pub(crate) fn drip_workspace_family_eq(
+    app: &AppState,
+    entry: &crate::ui::AgentPanelEntry,
+    field: &crate::api::schema::AgentViewField,
+    value: &crate::api::schema::AgentViewValue,
+) -> bool {
+    // Ours only. Another plugin's `workspace_id == current_workspace_id` is
+    // the documented exact match and stays exact -- widening someone else's
+    // filter would be changing an API meaning out from under them.
+    if !app.drip_scope_is_current() {
+        return false;
+    }
+    if !matches!(
+        field,
+        crate::api::schema::AgentViewField::Builtin(
+            crate::api::schema::AgentViewBuiltinField::WorkspaceId
+        )
+    ) {
+        return false;
+    }
+    if !matches!(
+        value,
+        crate::api::schema::AgentViewValue::Context {
+            context: crate::api::schema::AgentViewContext::CurrentWorkspaceId
+        }
+    ) {
+        return false;
+    }
+
+    // The workspace being PRESENTED, not the focused one: herdr's own context
+    // value follows the sidebar selection while you are navigating it, and an
+    // agent panel that stopped tracking the selection would be a new bug in
+    // place of this one.
+    let Some(here) = crate::app::agent_view::presented_workspace_idx(app)
+        .and_then(|idx| app.workspaces.get(idx))
+        .and_then(|workspace| workspace.worktree_space())
+    else {
+        return false;
+    };
+    let Some(there) = app
+        .workspaces
+        .get(entry.ws_idx)
+        .and_then(|workspace| workspace.worktree_space())
+    else {
+        return false;
+    };
+    here.key == there.key
+}
