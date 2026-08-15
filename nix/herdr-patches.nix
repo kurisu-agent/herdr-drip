@@ -673,5 +673,73 @@ herdrPkg.overrideAttrs (old: {
     # invisible — but the mouse can no longer cycle it.
     substituteInPlace src/app/input/mouse.rs \
       --replace-fail '                        self.agent_panel_sort = match self.agent_panel_sort {' '                        self.drip_toggle_agent_scope(); let _ = match self.agent_panel_sort {'
+
+    # sidebar-tab-tree: the workspace list gets a second nesting level. A
+    # workspace's TABS hang under it — and under a worktree child when that is
+    # what owns them — so the sidebar can say what the work in a space is and
+    # not merely that there is some. Stock nests worktrees and nothing else;
+    # tabs exist in the UI only as the tab bar of whichever workspace happens
+    # to be active.
+    #
+    # No plugin surface reaches it. A plugin's sidebar reach is the per-row
+    # TOKEN list, which is text inside a row herdr has already decided exists:
+    # it cannot add rows, cannot nest them, and cannot be clicked. This is row
+    # geometry, and row geometry here is `workspace_row_height` plus the four
+    # passes that measure against it.
+    #
+    # The shape of the patch is chosen to keep the blast radius at four
+    # anchors. `WorkspaceListEntry` is NOT extended: it is a one-variant enum
+    # that five sites across three files destructure with an irrefutable
+    # `let`, so a `Tab` variant would be five more anchors and a rewrite of
+    # every index and scroll path in the list — including the agent panel's
+    # neighbours, which this branch is deliberately not touching. Instead the
+    # tab rows ride inside the workspace's own card: the entry list, the
+    # scroll offsets, `app.selected` and every hit test keyed off them are
+    # byte-identical, and the card is simply taller. Tall cards are stock
+    # behaviour — a multi-row space row is what `workspace_row_height` is for.
+    #
+    # See sidebar-tab-tree.rs for the glyphs (`├╴`/`╰╴`, two columns against
+    # the navigator's three, because 26 columns cannot afford two levels of
+    # `├── `) and the collapse key; sidebar-tab-tree-input.rs for the clicks.
+    cat ${./sidebar-tab-tree.rs} >> src/ui/sidebar.rs
+    cat ${./sidebar-tab-tree-input.rs} >> src/app/input/sidebar.rs
+
+    # THE ONE MEASUREMENT. Stock's body is renamed and kept verbatim, and the
+    # name every caller uses now answers stock's height plus one row per tab.
+    # That is what makes the rest agree without being told: the four passes
+    # that size, scroll and place cards (`workspace_list_visible_count`,
+    # `workspace_list_bottom_start`, `compute_workspace_list_areas`) and the
+    # drip's own `drip_auto_section_split` above all call this and nothing
+    # else, so the divider moves down to make room for tab rows using the same
+    # number the renderer draws them in. `sidebar_section_heights`'s 3-row
+    # clamp still guarantees the agent panel survives a space with twenty
+    # tabs; the list scrolls, exactly as it does for twenty workspaces.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail 'fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 {' 'fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 { return drip_stock_workspace_row_height(app, ws, indented).saturating_add(drip_tab_rows(app, ws)); } fn drip_stock_workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 {'
+
+    # The draw, in the rows the measurement just reserved. Anchored on the
+    # worktree-group chevron because that is the one line after the card's
+    # token-row loop and before the next card, with `card`, `is_last_child`
+    # and `list_bottom` all still in scope. Where stock's rows END is NOT read
+    # off the renderer's own row vector but recomputed from the measuring
+    # function, so the draw and the hit test read one number and a click can
+    # never land on a row other than the one under the pointer.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '        if let Some((_, collapsed)) = parent_group {' '        drip_render_tab_rows(app, frame, card, list_bottom, is_last_child); if let Some((_, collapsed)) = parent_group {'
+
+    # app::input reads the geometry through `crate::ui`, so the two hit-test
+    # helpers join the sidebar re-export list. One line of it, and the names
+    # are appended rather than the list rewritten.
+    substituteInPlace src/ui.rs \
+      --replace-fail '        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections,' '        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections, drip_tab_tree_caret_at, drip_tab_tree_target_at,'
+
+    # The click, asked BEFORE `workspace_at_row` because a tab row is inside
+    # its workspace's card and that function would answer for it. The caret
+    # goes first for the same reason: it sits on the workspace's own first
+    # row. Both sit in the LEFT-button branch at 20 spaces — the right-button
+    # copy of this line is at 16 and keeps stock behaviour, so a right-click
+    # anywhere in a card still opens that workspace's menu.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '                    if let Some(idx) = self.workspace_at_row(mouse.row) {' '                    if self.drip_toggle_tab_tree_at(mouse.column, mouse.row) { return None; } if let Some((ws_idx, pane_id)) = self.drip_sidebar_tab_target_at(mouse.row) { self.mode = Mode::Terminal; return Some(MouseAction::FocusPane { ws_idx, pane_id }); } if let Some(idx) = self.workspace_at_row(mouse.row) {'
   '';
 })
