@@ -551,6 +551,10 @@ same way the plugin directories curate everything else. Current set:
   showing which scope the agent list is in, and flipping it when clicked. The
   visible half of **drip.agent-scope**; it moves into the cell
   `sidebar-quiet-chrome` emptied. See below.
+- **agent-scope-family** — "this space" means this space *and the rest of its
+  repo*: a repo row shows its worktrees' agents and a worktree shows its
+  siblings'. herdr models worktrees as sibling workspaces, and the agent view's
+  filter language has no repo field to say so with. See below.
 
 They apply as one function, so every host gets the identical set:
 
@@ -919,11 +923,86 @@ patched checkout would fail exactly there. The sort itself is not lost:
 `ui.agent_panel_sort` still sets it, and its label was already invisible. The
 mouse just no longer cycles it.
 
+### agent-scope-family: a repo and its worktrees are one space
+
+Standing on `beads-ui` and seeing none of the agents in its worktrees is the
+bug this fixes. herdr models a worktree as a **sibling workspace**, not a child
+of the repo it came from:
+
+```
+w6  beads-ui       repo_key=/home/dev/Code/demos/beads-ui/.git
+w7  graph-view     repo_key=/home/dev/Code/demos/beads-ui/.git   (linked)
+w8  epic-tree      repo_key=/home/dev/Code/demos/beads-ui/.git   (linked)
+w9  health-panel   repo_key=/home/dev/Code/demos/beads-ui/.git   (linked)
+```
+
+Four workspaces sharing nothing but a `WorktreeSpaceMembership`, so a view
+filtered on workspace id can never reach w7–w9 from w6 — and the repo row is
+exactly where you stand to ask what the whole repo is doing. "This space" now
+means this space **plus every workspace in the same repo family**, in both
+directions: from the repo you see the worktrees, from a worktree you see the
+repo and its siblings.
+
+**Matched on `repo_key`, not `repo_root`**, for two reasons. It is what herdr
+itself groups on — `space.key` backs the sidebar's own worktree grouping, its
+collapse state (`collapsed_space_keys`) and its aggregate status, and the API
+field is literally `repo_key: space.key.clone()` — so the agent list now groups
+by the same rule as the workspace list right above it, and those two
+disagreeing would be worse than either rule being wrong. It is also the more
+precise key: herdr fills it from the repo's `.git` path, one identity for the
+main checkout and every linked worktree, where `repo_root` is a plain directory
+path a second clone elsewhere could coincide with.
+
+**A workspace with no worktree record is untouched.** Membership is what the
+widening keys on, and herdr only attaches one to a workspace that is part of a
+worktree family — plain git checkouts like `herdr-drip` and `demos` carry none
+at all. No membership, no widening, plain id match, exactly as before.
+
+#### Why this is a patch and not the plugin
+
+**The filter language cannot express it.** Its fields are `status`,
+`workspace_id`, `tab_id`, `pane_id`, `agent`, `seen`, `state_change_seq` plus
+free `token` lookups; its only *dynamic* values are the context vars
+`current_workspace_id` and `current_tab_id`. There is no repo field and no repo
+context, and `validate_field_value` whitelists context values to exactly those
+two (field, context) pairs — so even a token carrying the repo key could only
+ever be compared against a **static** string.
+
+The documented escape is to resolve the sibling ids in the plugin and send
+`in: [w6, w7, w8, w9]`, refreshing on `workspace.focused`. That hook does
+exist, and the route was still rejected, for a reason worth writing down: **a
+static id list cannot track what herdr actually filters against.**
+`presented_workspace_idx` follows the sidebar *selection* while the sidebar is
+being navigated (`Mode::Navigate` reads `app.selected`, not `app.active`), and
+`WorkspaceFocused` is emitted from the pane-focus path — it never fires for
+selection movement. The list would be stale precisely while you are arrowing
+through spaces reading the agent panel. It would also spawn a process and a
+socket round trip on every space switch, and show one frame of the previous
+repo's agents each time.
+
+Evaluated in place, none of that exists: the question is asked per render,
+against the same presented workspace the stock context var uses.
+
+The patch is **one `||` in front of the stock comparison**, so it can only
+widen, never narrow — exact id equality still answers first for everything, and
+the family test adds the rest only for our own view (by source), only for the
+one filter shape our view sends, and only when both workspaces carry a
+membership. Another plugin's `workspace_id == current_workspace_id` stays the
+documented exact match; widening someone else's filter would be changing an API
+meaning out from under them.
+
+The plugin keeps sending that stock filter **unchanged**. This widens what the
+filter means on a patched herdr rather than inventing a shape only a patched
+herdr could parse — so drip.agent-scope on a stock herdr still works and simply
+stays exact, which is what it did until now.
+
 ## agent-scope: the agent list is about this space
 
 The sidebar's agent panel lists every agent in every space, which on a host
 with a dozen spaces is a list you scroll rather than read. This plugin makes
-it show the space you are looking at, and widens it again on one click.
+it show the space you are looking at — and, on a patched herdr, the rest of
+that space's repo family with it (**agent-scope-family**, above) — and widens
+it back to everything on one click.
 
 **The icon in the agent panel's header is the toggle** — one window () for
 this space, two () for every space, so the control and the state indicator

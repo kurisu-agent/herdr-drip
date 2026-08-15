@@ -673,5 +673,55 @@ herdrPkg.overrideAttrs (old: {
     # invisible — but the mouse can no longer cycle it.
     substituteInPlace src/app/input/mouse.rs \
       --replace-fail '                        self.agent_panel_sort = match self.agent_panel_sort {' '                        self.drip_toggle_agent_scope(); let _ = match self.agent_panel_sort {'
+
+    # agent-scope-family: "this space" means this space AND the rest of its
+    # repo — the workspace you are on plus every worktree of the same checkout.
+    #
+    # herdr models a worktree as a SIBLING workspace, not a child: `beads-ui`
+    # and its `graph-view` / `epic-tree` / `health-panel` worktrees are four
+    # workspaces sharing only a `WorktreeSpaceMembership`. So an agent view
+    # filtered by workspace id could never show a repo row its own worktrees'
+    # agents, which is precisely the row you stand on to ask what the whole
+    # repo is doing.
+    #
+    # THE FILTER LANGUAGE CANNOT SAY THIS, which is why it is here and not in
+    # the plugin. Its fields are status / workspace_id / tab_id / pane_id /
+    # agent / seen / state_change_seq plus free `token` lookups, and its only
+    # dynamic values are the two context vars `current_workspace_id` and
+    # `current_tab_id` — no repo field, no repo context, and
+    # `validate_field_value` whitelists context values to exactly those two
+    # (field, context) pairs, so even a token carrying the repo key could only
+    # ever be compared against a STATIC string.
+    #
+    # The documented escape — have the plugin resolve the sibling ids itself
+    # and send `in: [w6, w7, w8, w9]`, refreshing on `workspace.focused` — was
+    # tried on paper and rejected for one concrete reason: a static id list
+    # cannot track what herdr actually filters against.
+    # `presented_workspace_idx` follows the SIDEBAR SELECTION while the sidebar
+    # is being navigated (`Mode::Navigate` reads `app.selected`, not
+    # `app.active`), and `WorkspaceFocused` is emitted from the pane-focus path
+    # — it does not fire when you merely move the selection. So the list would
+    # be stale exactly while you are arrowing through spaces looking at the
+    # agent panel, which is the moment it is being read. It would also spawn a
+    # process and a socket round trip on every space switch, and show one frame
+    # of the previous repo's agents each time.
+    #
+    # Evaluated in place, none of that exists: this is asked per render against
+    # the same presented workspace the stock context var uses.
+    #
+    # It is one `||` in front of the stock comparison, so it can only ever
+    # WIDEN, never narrow: the exact id match still answers first for
+    # everything, and drip_workspace_family_eq (agent-scope-icon.rs) adds the
+    # rest of the family only for our own view, only for the one filter shape
+    # our view sends, and only when BOTH workspaces carry a worktree record.
+    # A workspace that is not a git checkout has no membership, so it matches
+    # nothing extra and behaves exactly as it did.
+    #
+    # The plugin keeps sending the stock filter unchanged — this widens what
+    # that filter MEANS on a patched herdr rather than inventing a shape only
+    # a patched herdr could parse, so drip.agent-scope on a stock herdr still
+    # works and simply stays exact, which is what it did until now.
+    substituteInPlace src/app/agent_view.rs \
+      --replace-fail '            field_value(app, entry, field) == operand_value(app, value)' '            crate::app::state::drip_workspace_family_eq(app, entry, field, value) || field_value(app, entry, field) == operand_value(app, value)'
   '';
 })
