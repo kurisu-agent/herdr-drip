@@ -6,15 +6,23 @@
 #   scope current   only the space you are looking at (the default)
 #   scope all       every space, herdr's stock behaviour
 #
-# The scope is one word in the plugin's state dir, so a toggle survives the
-# next toggle, a `herdr server reload-config`, and a restart -- the startup
-# hook reads it back. No file means `current`: the default is the absence of
-# state, not a value written at install time.
+# The scope is one word in the drip's state dir, so a toggle survives the next
+# toggle, a `herdr server reload-config`, and a restart -- the startup hook
+# reads it back. No file means `current`: the default is the absence of state,
+# not a value written at install time.
+#
+# It lives under `herdr-drip/` rather than in $HERDR_PLUGIN_STATE_DIR because
+# this plugin is not the only writer: the sidebar-scope-icon hardcore patch
+# flips the same scope when you click the agent panel's icon, and writes this
+# same file so the next server starts in the scope you last chose. One file is
+# the whole contract between them -- the same arrangement the accounts rail
+# has with drip.gumbo-usage, in the same state root, and for the same reason:
+# neither side has to know the other exists.
 set -euo pipefail
 
 mode=${1:-toggle}
-state_dir=${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr/plugins/drip.agent-scope}
-state_file=$state_dir/scope
+state_file=${HERDR_DRIP_AGENT_SCOPE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip/agent-scope}
+state_dir=$(dirname -- "$state_file")
 root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
 
 stored=current

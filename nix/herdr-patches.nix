@@ -546,19 +546,18 @@ herdrPkg.overrideAttrs (old: {
     # Every substitution below empties what is DRAWN and leaves every rect the
     # hit-testing reads untouched, so the click targets stay exactly where
     # they were: the footer's new/menu zones still work (they were only
-    # visible on hover — mouse_capture — anyway), and the sort toggle keeps
-    # the corner rect `agent_panel_toggle_rect` computes from the real label.
-    # That asymmetry is deliberate and is what keeps herdr's own tests green —
-    # clicking_agent_panel_toggle_switches_sort clicks the rect the GEOMETRY
-    # function returns, not the pixels. The menu badge dot survives its label:
-    # `●` is an attention signal, not chrome.
+    # visible on hover — mouse_capture — anyway). The menu badge dot survives
+    # its label: `●` is an attention signal, not chrome.
     #
-    # The agent-view label goes with them, and has to: drip.agent-scope keeps
-    # a view active permanently (this space's agents, its default), so the
-    # corner would read `filtered` on every frame forever — the same caption
-    # in the same cell the sort label just vacated. Blanking the fallback
-    # rather than the whole expression leaves a LABELLED view able to say so,
-    # which is the case where the word is worth its columns.
+    # The corner cell is the exception, and it is not empty for long —
+    # sidebar-scope-icon below moves into it. The two halves of that cell are
+    # here because this is where its text died: the sort label
+    # (`grouped`/`priority`), and the agent-view label under it, which would
+    # otherwise read `filtered` on every frame forever now that
+    # drip.agent-scope keeps a view active by default. Blanking the label's
+    # FALLBACK rather than the whole expression is what leaves a labelled view
+    # able to say so — and what lets the icon patch tell "no label" from "a
+    # label worth its columns" with one `.filter`.
     substituteInPlace src/ui/sidebar.rs \
       --replace-fail 'Paragraph::new(Span::styled(" new", Style::default().fg(p.overlay0))),' 'Paragraph::new(Span::styled("", Style::default().fg(p.overlay0))),'
 
@@ -572,7 +571,7 @@ herdrPkg.overrideAttrs (old: {
       --replace-fail '            " agents",' '            "",'
 
     substituteInPlace src/ui/sidebar.rs \
-      --replace-fail '        .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));' '        .unwrap_or("");'
+      --replace-fail '        .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));' '        .filter(|label| !label.is_empty()).unwrap_or_else(|| app.drip_scope_glyph());'
 
     substituteInPlace src/ui/sidebar.rs \
       --replace-fail '.map(|view| view.label.as_deref().unwrap_or("filtered"))' '.map(|view| view.label.as_deref().unwrap_or(""))'
@@ -606,5 +605,73 @@ herdrPkg.overrideAttrs (old: {
 
     substituteInPlace src/ui/sidebar.rs \
       --replace-fail '    let ratio = split_ratio.clamp(0.1, 0.9);' '    let ratio = split_ratio.clamp(0.0, 1.0);'
+
+    # sidebar-scope-icon: one clickable cell in the agent panel's header that
+    # says which scope the list is in — a window for this space, two windows
+    # for every space — and flips it when clicked. drip.agent-scope's toggle,
+    # as a thing you can see and hit rather than a key you have to know.
+    #
+    # It lands in the cell sidebar-quiet-chrome just emptied, which is the
+    # right cell twice over: it is where the agent panel has always kept its
+    # one control, and that control was ALREADY DEAD in the drip's default
+    # state — `on_agent_panel_sort_toggle` returns false whenever an agent
+    # view is active, and drip.agent-scope keeps one active. So this takes a
+    # cell that does nothing on a default host and gives it something to do.
+    #
+    # herdr has real click routing here and this uses it rather than inventing
+    # any: the sidebar's clickable elements are each a `*_rect` geometry
+    # function in ui/sidebar.rs plus an `on_*` hit test in app/input/sidebar.rs
+    # that handle_mouse asks in order, and all three of those are patched
+    # below — the same three pieces `sidebar_new_button_rect` and the workspace
+    # rows use. Nothing here paints its own hit region or second-guesses
+    # herdr's dispatch order.
+    #
+    # The state and the glyphs are in agent-scope-icon.rs, appended to
+    # app/state.rs because the renderer and app::input both have to name them
+    # and `app::input` is private — the same constraint pane-menu-labels.rs
+    # works under.
+    cat ${./agent-scope-icon.rs} >> src/app/state.rs
+
+    # The hit test, freed of the guard that made it inert. That guard exists
+    # because a filtered panel has no sort to cycle; the cell now toggles the
+    # FILTER itself, which is precisely the thing that is still meaningful
+    # while a view is active — so the condition that used to disable it is the
+    # condition it is now for.
+    substituteInPlace src/app/input/sidebar.rs \
+      --replace-fail '        if self.sidebar_collapsed || self.agent_view_override.is_some() {' '        if self.sidebar_collapsed {'
+
+    # ...and sized to the glyph rather than to `grouped`/`priority`. The rect
+    # is what the hit test reads, and the renderer sizes the drawn cell from
+    # the same helper with the same one-column string, so the region you can
+    # click is exactly the glyph you can see instead of the seven blank columns
+    # left of it. Either glyph gives the same width (both are single-width
+    # Codicons), so the constant does not have to know which scope is on.
+    #
+    # The discarded `agent_panel_sort_label(sort)` call is not noise: this line
+    # and the renderer's are that helper's ONLY two callers, and the other one
+    # is patched above — so without it both the parameter and the function go
+    # unused and the build warns twice about a herdr function this patch
+    # merely stopped drawing. herdr still owns the sort; we own the cell.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    agent_panel_header_label_rect(area, agent_panel_sort_label(sort))' '    { let _ = agent_panel_sort_label(sort); agent_panel_header_label_rect(area, crate::app::state::DRIP_SCOPE_GLYPH_CURRENT) }'
+
+    # The click. One line, so the `match` it used to open is left parsing and
+    # its value discarded rather than the whole block being rewritten — a
+    # multi-line anchor would be at the mercy of nix's indented-string
+    # stripping, and this keeps the two statements after it (`scroll = 0`,
+    # `mark_session_dirty`) exactly where they were, both of which a scope
+    # change wants anyway.
+    #
+    # THE COST, stated plainly: the pane menu is not the only place this drip
+    # has taken a herdr gesture, and like `Close pane` before it, this breaks
+    # one of herdr's own tests — `clicking_agent_panel_toggle_switches_sort`
+    # clicks this cell and asserts the SORT changed, which it no longer does.
+    # The nix build does not run herdr's tests (`doCheck = false`) and neither
+    # does check-herdr-patches.sh, so nothing here catches it; a `cargo test`
+    # on a patched checkout would fail exactly there. The sort itself is not
+    # lost — `ui.agent_panel_sort` still sets it, and its label was already
+    # invisible — but the mouse can no longer cycle it.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '                        self.agent_panel_sort = match self.agent_panel_sort {' '                        self.drip_toggle_agent_scope(); let _ = match self.agent_panel_sort {'
   '';
 })

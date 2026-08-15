@@ -42,8 +42,8 @@ herdr plugin log list --plugin drip.hello
 
 `config/herdr.toml` is the drip's curated herdr config — keybindings layered
 under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Ctrl+b [` to flip a split,
-`Ctrl+b a` to widen or narrow the agent list, `Alt+Shift+arrows` for pane
-focus), sidebar rows wired to the plugins'
+`Ctrl+b a` as a second way to widen or narrow the agent list — the icon in its
+header is the first — `Alt+Shift+arrows` for pane focus), sidebar rows wired to the plugins'
 `$worktree` token, a tab bar that hides itself while there is only one tab
 (`hide_tab_bar_when_single_tab` — one tab is not a choice, so the row showing
 it is a line of terminal spent on nothing), the colour scheme (below), and the
@@ -547,6 +547,10 @@ same way the plugin directories curate everything else. Current set:
 - **sidebar-auto-split** — the divider between the workspace list and the
   agent panel follows the list instead of a dragged ratio, so opening and
   closing spaces resizes both sections on its own. See below.
+- **sidebar-scope-icon** — a clickable icon in the agent panel's header
+  showing which scope the agent list is in, and flipping it when clicked. The
+  visible half of **drip.agent-scope**; it moves into the cell
+  `sidebar-quiet-chrome` emptied. See below.
 
 They apply as one function, so every host gets the identical set:
 
@@ -854,14 +858,81 @@ than churning a field nobody reads. The ratio guard itself widens from
 `(0.1, 0.9)` to `(0.0, 1.0)` — a three-space list on a tall sidebar should not
 be forced to hold a tenth of it.
 
+### sidebar-scope-icon: the toggle you can see
+
+One cell in the agent panel's header, showing which scope the list is in and
+flipping it when clicked:
+
+| Glyph | Codepoint | Name | Means |
+| --- | --- | --- | --- |
+|  | `U+EB7F` | `cod-window` | this space's agents |
+|  | `U+EB23` | `cod-multiple_windows` | every space's |
+
+Both are Codicons, the block the pane menu's four glyphs already come from —
+and this drip already spends `cod-window` on `New Space` and
+`cod-multiple_windows` on `New Tab`, so a window has meant a space here since
+that patch landed. One window is this space, more than one is every space:
+existing vocabulary, no new glyph to learn. Deliberately **not** the Material
+Design plane `sidebar-version`'s drop lives in, whose codepoints moved
+wholesale in Nerd Fonts v3 and render as tofu on an older patched font — a
+one-column cell has nothing to degrade into. The cell also keeps herdr's own
+colour rule for it: accent while a view is active, neutral otherwise, so scope
+reads twice over.
+
+**It lands in the cell `sidebar-quiet-chrome` emptied, and that cell was
+already dead.** `on_agent_panel_sort_toggle` — herdr's hit test for the sort
+label — returns false whenever an agent view is active, and drip.agent-scope
+keeps one active by default. So on a default drip host that corner was a
+control that could not be clicked; this gives it something to do.
+
+**herdr's click routing is real and this uses it rather than inventing any.**
+Every clickable thing in the sidebar is the same three pieces: a `*_rect`
+geometry function in `ui/sidebar.rs`, an `on_*` hit test in
+`app/input/sidebar.rs`, and an arm in `handle_mouse` that asks them in order.
+All three are patched, none is bypassed:
+
+- the **rect** (`agent_panel_toggle_rect`) is sized to the glyph instead of to
+  `grouped`/`priority`, so the region you can click is the glyph you can see
+  rather than the seven blank columns left of it;
+- the **hit test** loses the `|| self.agent_view_override.is_some()` guard —
+  that guard is there because a filtered panel has no sort to cycle, and the
+  cell now toggles the filter itself, which is exactly what stays meaningful
+  while a view is active;
+- the **arm** calls `drip_toggle_agent_scope`, which sets or clears the same
+  view, on the same source, that the plugin sets over the socket.
+  `handle_agent_view_set` is validation plus a field and two scroll resets, and
+  those three are all reachable from `AppState` — which matters, because
+  `handle_mouse` is `impl AppState` and has no `App` to dispatch an API call
+  with.
+
+The state and glyphs live in `nix/agent-scope-icon.rs`, appended to
+`app/state.rs` rather than to the sidebar: the renderer and `app::input` both
+have to name them, `app::input` is private, and `app::state` is the one module
+either side can reach — the same constraint `pane-menu-labels.rs` works under.
+
+**The cost, stated plainly:** like the pane menu's `Close pane` before it, this
+breaks one of herdr's own tests. `clicking_agent_panel_toggle_switches_sort`
+clicks this cell and asserts the sort changed, which it no longer does. The nix
+build does not run herdr's tests (`doCheck = false`) and neither does
+`check-herdr-patches.sh`, so nothing here catches it — a `cargo test` on a
+patched checkout would fail exactly there. The sort itself is not lost:
+`ui.agent_panel_sort` still sets it, and its label was already invisible. The
+mouse just no longer cycles it.
+
 ## agent-scope: the agent list is about this space
 
 The sidebar's agent panel lists every agent in every space, which on a host
 with a dozen spaces is a list you scroll rather than read. This plugin makes
-it show the space you are looking at, and gives you one key to widen it:
+it show the space you are looking at, and widens it again on one click.
+
+**The icon in the agent panel's header is the toggle** — one window () for
+this space, two () for every space, so the control and the state indicator
+are the same cell. That half is a hardcore patch (`sidebar-scope-icon`,
+above); this plugin is the half that holds the scope and re-applies it. The
+other ways in, none of them the one to reach for first:
 
 ```
-Ctrl+b a                                             # toggle
+Ctrl+b a                                             # secondary, and free
 herdr plugin action invoke toggle --plugin drip.agent-scope
 herdr plugin action invoke current --plugin drip.agent-scope
 herdr plugin action invoke all --plugin drip.agent-scope
@@ -880,11 +951,18 @@ invoked once and the panel follows your focus from then on. `all` does not set
 a filter that matches everything; it **clears** the view, because an inactive
 view is stock behaviour, which is what "every space" means.
 
-The scope is one word under `$HERDR_PLUGIN_STATE_DIR`, so a toggle survives
-the next toggle and a restart. herdr does not persist an agent view, so
-`[[startup]]` re-applies it after each session restore — which is also what
-makes this-space-only the **default**: a server that has never seen this
-plugin has no state file, and `apply` reads that as `current`.
+The scope is one word in `$XDG_STATE_HOME/herdr-drip/agent-scope`
+(`$HERDR_DRIP_AGENT_SCOPE_FILE` overrides), so a toggle survives the next
+toggle and a restart. herdr does not persist an agent view, so `[[startup]]`
+re-applies it after each session restore — which is also what makes
+this-space-only the **default**: a server that has never seen this plugin has
+no state file, and `apply` reads that as `current`.
+
+That file is in the drip's state root rather than the plugin's own because the
+plugin is not its only writer: **sidebar-scope-icon** writes it too, on every
+click. One file is the whole contract between the two halves — the same
+arrangement the accounts rail has with gumbo-usage, in the same state root,
+and for the same reason: neither side needs to know the other exists.
 
 Two details worth knowing:
 
