@@ -118,9 +118,11 @@ command = "herdr plugin action invoke flip --plugin drip.flip-split"
 description = "flip split orientation"
 
 # Ctrl+b a — the agent panel lists this space's agents (the default) or every
-# space's. A free key in both herdr's defaults and this file, and the toggle
-# needs one: an action's `contexts` are advisory in 0.8.0, so a plugin action
-# reaches the palette and the keybindings but never herdr's own menus.
+# space's. The SECONDARY way to do it: the icon in the agent panel's header
+# says which scope is on and flips it when clicked (sidebar-scope-icon), and
+# that is the one to reach for. This stays because it costs nothing and lands
+# in the same place — the plugin action and the icon write the same state file
+# and set the same agent-view source, so neither can leave the other stale.
 [[keys.command]]
 key = "prefix+a"
 command = "herdr plugin action invoke toggle --plugin drip.agent-scope"
