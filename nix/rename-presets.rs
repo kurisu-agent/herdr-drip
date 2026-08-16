@@ -147,9 +147,12 @@ pub(crate) fn drip_rename_preset_at(inner: Rect, column: u16, row: u16) -> Optio
 /// Both callers of that function -- the renderer and the mouse hit test -- are
 /// patched to go through here, which is what keeps the drawn buttons and the
 /// clickable buttons the same cells. On a modal too short to hold the band the
-/// `min` collapses it to what there is and the buttons land exactly where
-/// stock put them, which is the same graceful nothing `drip_rename_preset_rects`
-/// does one function up.
+/// `min` collapses it to what there is, so the band starts at the modal's top
+/// and the buttons land on its last row -- the bottom of whatever the popup
+/// was clamped to, which is where they belong on a short modal too. Both
+/// callers read this one function, so drawn and clickable stay identical at
+/// every height, the same graceful nothing `drip_rename_preset_rects` does one
+/// function up.
 pub(crate) fn drip_rename_button_area(inner: Rect) -> Rect {
     let height = inner.height.min(DRIP_RENAME_ACTION_BAND);
     Rect::new(

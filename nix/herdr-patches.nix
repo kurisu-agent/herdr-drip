@@ -846,9 +846,10 @@ herdrPkg.overrideAttrs (old: {
       --replace-fail '    let (save_rect, clear_rect, cancel_rect) = rename_button_rects(inner);' '    drip_render_rename_presets(frame, inner, &app.palette); let (save_rect, clear_rect, cancel_rect) = rename_button_rects(crate::app::state::drip_rename_button_area(inner));'
 
     # The hit test's half of that move. This line and the one above are the
-    # function's ONLY two callers, which is what makes the shift safe to do at
-    # the call sites: the buttons you can see and the buttons you can click are
-    # computed from the same rect, one line apart in this file.
+    # function's only two NON-TEST callers, which is what makes the shift safe
+    # to do at the call sites: the buttons you can see and the buttons you can
+    # click are computed from the same rect, one line apart in this file. The
+    # two test callers are handled below.
     substituteInPlace src/app/input/mouse.rs \
       --replace-fail '                        .map(crate::ui::rename_button_rects)' '                        .map(|inner| crate::ui::rename_button_rects(crate::app::state::drip_rename_button_area(inner)))'
 
@@ -877,5 +878,22 @@ herdrPkg.overrideAttrs (old: {
     # tree by hand.
     substituteInPlace src/ui/dialogs.rs \
       --replace-fail '        let popup = super::centered_popup_rect(area, 56, 7).expect("popup fits");' '        let popup = super::centered_popup_rect(area, 56, crate::app::state::DRIP_RENAME_POPUP_HEIGHT).expect("popup fits");'
+
+    # And the OTHER test caller of `rename_button_rects`, for the same reason.
+    # `clicking_rename_save_submits_workspace_rename_through_api_path` asks
+    # `rename_modal_inner` where the modal is and then asks stock's
+    # `rename_button_rects` where `save` is inside it — so with the modal
+    # taller and the action row moved to its floor, it would click row 3 of a
+    # 12-row inner, which is now the presets' rule row: no preset, no button,
+    # and `unwrap_or(ModalAction::Cancel)` closes the dialog without renaming
+    # anything. The test would fail on a rename the real dialog performs fine.
+    # Routing it through the same `drip_rename_button_area` the handler uses
+    # keeps it clicking the button it means to click.
+    #
+    # Its sibling in `app/input/modal.rs` needs nothing: it feeds the rect it
+    # computed straight back into `modal_action_from_buttons`, so it is
+    # self-consistent at any offset.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '        let (save, _, _) = crate::ui::rename_button_rects(inner);' '        let (save, _, _) = crate::ui::rename_button_rects(crate::app::state::drip_rename_button_area(inner));'
   '';
 })

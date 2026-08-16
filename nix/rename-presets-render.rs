@@ -39,7 +39,7 @@ pub(super) fn drip_render_rename_presets(
     if let Some(rule) = crate::app::state::drip_rename_rule_row(inner) {
         let width = rule.width as usize;
         let caption = "\u{2500} presets ";
-        let text = if width > caption.chars().count() {
+        let text = if width >= caption.chars().count() {
             format!(
                 "{caption}{}",
                 "\u{2500}".repeat(width - caption.chars().count())
