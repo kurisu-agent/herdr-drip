@@ -59,6 +59,11 @@
   config,
   lib,
   pkgs,
+  # This flake's own pinned beads, supplied by nixosModules.plugins so the
+  # default works on a host that has never heard of bd. Absent (null) when
+  # nix/plugins.nix is imported directly as a plain module rather than through
+  # the flake, which keeps that path working exactly as it did before.
+  beadsDefault ? null,
   ...
 }:
 
@@ -66,6 +71,12 @@ let
   cfg = config.services.herdr-drip.plugins;
 
   dripPlugins = import ./drip-plugins.nix pkgs;
+
+  # bd reaches the beads plugin and nothing else. Its only consumer is that
+  # plugin's bin/, so it is scoped there rather than added to systemPackages —
+  # see the comment on environment.systemPackages below, and the identical
+  # call python3 gets in claude-agent-state.nix.
+  pluginRuntimeInputs = name: lib.optional (name == "beads" && cfg.beadsPackage != null) cfg.beadsPackage;
 
   # Where the published plugin directories live. Also the marker this module
   # reads back out of the registry to tell its own links from a developer's.
@@ -80,7 +91,7 @@ let
   repoPlugins = map (name: {
     inherit name;
     id = (builtins.fromTOML (builtins.readFile (../. + "/${name}/herdr-plugin.toml"))).id;
-    package = dripPlugins.mkPlugin name;
+    package = dripPlugins.mkPluginWith { runtimeInputs = pluginRuntimeInputs name; } name;
   }) cfg.plugins;
 
   # `extraPlugins` states its ids rather than reading them, because the whole
@@ -309,6 +320,30 @@ in
         Removing a name does NOT unlink it — the module never touches
         plugins outside this list. Set to `[ ]` to provision none of them
         and leave the user to `herdr plugin install` whatever they want.
+      '';
+    };
+
+    beadsPackage = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = beadsDefault;
+      defaultText = lib.literalExpression "this flake's pinned beads (github:gastownhall/beads/v1.2.2)";
+      description = ''
+        The `bd` the beads plugin runs. Scoped to that plugin's own
+        commands — it does not land on any interactive PATH — so the rail
+        works on a host where `bd` is otherwise only inside a repo's
+        devshell, which is where the plugin previously found nothing and
+        drew an empty rail without saying why.
+
+        Point this at a bd the host ALREADY has rather than taking the
+        default, when it has one: two beads of different versions on one
+        box is the hazard the pin comment in this flake describes, because
+        the first write by the newer one migrates the shared on-disk schema
+        and the older one then refuses to read it. On a drift-rust circuit
+        that means `inputs.drift-rust.packages.''${pkgs.system}.bd`.
+
+        `null` disables the injection: bd then has to be on the herdr
+        server's PATH by some other means, and the rail stays empty until
+        it is.
       '';
     };
 
