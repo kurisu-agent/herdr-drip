@@ -2,17 +2,19 @@
 //! launch mode (docked vs floating popup), the table sort key, and the bd
 //! status vocabulary that drives kanban columns and list groups.
 
-/// The status columns/groups, in board order. Mirrors bd 1.1.0 built-ins.
-/// Unknown/custom statuses are appended after these at render time.
-pub const STATUS_ORDER: &[&str] = &[
-    "open",
-    "in_progress",
-    "blocked",
-    "hooked",
-    "deferred",
-    "pinned",
-    "closed",
-];
+/// The status columns/groups, in board order. Unknown/custom statuses are
+/// appended after these at render time.
+///
+/// DRIP CHANGE: this was a `const` list of bd 1.1.0's built-ins, and is now
+/// whatever the config says (defaulting to exactly that list) -- see
+/// `crate::config`, and note that the sidebar rail reads the same setting out
+/// of the same file. A vocabulary is a thing boards disagree about: a repo
+/// that uses three statuses should not have four empty columns, and one with a
+/// custom status should be able to put it where it belongs rather than at the
+/// end.
+pub fn status_order() -> &'static [String] {
+    &crate::config::get().statuses
+}
 
 /// Glyph + category for a status (category unused for now but kept for parity
 /// with `bd statuses`).
@@ -51,10 +53,11 @@ pub fn status_label(status: &str) -> String {
 
 /// Rank a status for ordering; known statuses first (board order), unknowns last.
 pub fn status_rank(status: &str) -> usize {
-    STATUS_ORDER
+    let order = status_order();
+    order
         .iter()
-        .position(|s| *s == status)
-        .unwrap_or(STATUS_ORDER.len())
+        .position(|s| s == status)
+        .unwrap_or(order.len())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

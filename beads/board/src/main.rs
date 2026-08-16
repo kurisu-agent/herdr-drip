@@ -3,6 +3,7 @@
 
 mod app;
 mod bd;
+mod config;
 mod form;
 mod input;
 mod keys;

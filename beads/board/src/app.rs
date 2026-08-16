@@ -5,7 +5,7 @@ use crate::bd;
 use crate::bd::types::Bead;
 use crate::form::CreateForm;
 use crate::input::{Input, InputKind};
-use crate::model::{status_rank, Mode, Scope, SortKey, View, STATUS_ORDER};
+use crate::model::{status_order, status_rank, Mode, Scope, SortKey, View};
 use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet};
 
@@ -57,7 +57,11 @@ impl App {
             beads: Vec::new(),
             selected: None,
             collapsed: HashSet::new(),
-            show_closed: false,
+            // DRIP CHANGE: `C` still toggles it, but what it toggles FROM is
+            // configurable. A fresh process every time you open the board
+            // means a runtime-only default is a default you re-set on every
+            // open.
+            show_closed: crate::config::get().show_closed,
             sort: SortKey::Status,
             filter: String::new(),
             move_mode: false,
@@ -113,10 +117,10 @@ impl App {
     /// Board statuses in column order: known board statuses (minus closed unless
     /// shown) plus any custom statuses present among visible beads.
     pub fn board_statuses(&self) -> Vec<String> {
-        let mut v: Vec<String> = STATUS_ORDER
+        let mut v: Vec<String> = status_order()
             .iter()
-            .filter(|s| self.show_closed || **s != "closed")
-            .map(|s| s.to_string())
+            .filter(|s| self.show_closed || *s != "closed")
+            .cloned()
             .collect();
         for b in &self.beads {
             if self.is_visible(b) && !v.iter().any(|s| s == &b.status) {
