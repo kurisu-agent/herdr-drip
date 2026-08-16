@@ -75,19 +75,34 @@ rec {
   # DIRECTORY (worktree-graph's node_modules) fails the -f test and is skipped.
   #
   # The wrapper leaves the manifest alone: `[[startup]] command = ["bin/watch"]`
-  # and `[[panes]] command = ["./target/release/herdr-beads"]` still name files
-  # at those paths, and the real script keeps resolving its own root through
-  # `dirname $BASH_SOURCE/..` because wrapProgram leaves the hidden original
-  # beside it.
+  # and `[[panes]] command = ["./board/target/release/herdr-beads"]` still name
+  # files at those paths, and the real script keeps resolving its own root
+  # through `dirname $BASH_SOURCE/..` because wrapProgram leaves the hidden
+  # original beside it.
+  #
+  # `runtimeEnv` rides the same wrapper, and is how a NixOS host sets a
+  # plugin's settings without a config file. --set-DEFAULT deliberately: every
+  # drip plugin reads its knobs from the environment first, and the herdr
+  # SERVER's environment is where a person sets one for an afternoon. That
+  # person outranks the host's config, which is the layering `settings` already
+  # has with config/herdr.toml.
   mkPluginWith =
-    { runtimeInputs ? [ ] }:
+    { runtimeInputs ? [ ], runtimeEnv ? { } }:
     name:
     let
       splices = buildOutputs.${name} or { };
+      wrapping = runtimeInputs != [ ] || runtimeEnv != { };
+      wrapArgs =
+        lib.optionalString (runtimeInputs != [ ]) "--prefix PATH : ${lib.makeBinPath runtimeInputs}"
+        + lib.concatStrings (
+          lib.mapAttrsToList (
+            key: value: " --set-default ${lib.escapeShellArg key} ${lib.escapeShellArg value}"
+          ) runtimeEnv
+        );
     in
     pkgs.runCommandLocal "drip-plugin-${name}"
       {
-        nativeBuildInputs = lib.optional (runtimeInputs != [ ]) pkgs.makeWrapper;
+        nativeBuildInputs = lib.optional wrapping pkgs.makeWrapper;
       }
       ''
         cp -R ${pluginSrc name} $out
@@ -98,12 +113,12 @@ rec {
             ln -s ${source} $out/${destination}
           '') splices
         )}
-        ${lib.optionalString (runtimeInputs != [ ]) ''
+        ${lib.optionalString wrapping ''
           for command in "$out"/bin/* ${
             lib.concatMapStringsSep " " (destination: "\"$out\"/${destination}") (lib.attrNames splices)
           }; do
             [ -f "$command" ] && [ -x "$command" ] || continue
-            wrapProgram "$command" --prefix PATH : ${lib.makeBinPath runtimeInputs}
+            wrapProgram "$command" ${wrapArgs}
           done
         ''}
       '';

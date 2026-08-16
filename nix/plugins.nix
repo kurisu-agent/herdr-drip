@@ -84,6 +84,14 @@ let
   # hazard inside a single plugin.
   pluginRuntimeInputs = name: lib.optional (name == "beads" && cfg.beadsPackage != null) cfg.beadsPackage;
 
+  # The beads plugin's settings, as environment. Both of its surfaces read
+  # their knobs from the environment before the config file they share (see
+  # beads/board/src/config.rs), so this is the declarative half of that file:
+  # a host states what its rail and board should look like and no user has to
+  # write JSON into a directory herdr manages. Scoped to the plugin's own
+  # commands, like the bd above.
+  pluginRuntimeEnv = name: if name == "beads" then cfg.beadsSettings else { };
+
   # Where the published plugin directories live. Also the marker this module
   # reads back out of the registry to tell its own links from a developer's.
   etcSubdir = "herdr-drip/plugins";
@@ -97,7 +105,10 @@ let
   repoPlugins = map (name: {
     inherit name;
     id = (builtins.fromTOML (builtins.readFile (../. + "/${name}/herdr-plugin.toml"))).id;
-    package = dripPlugins.mkPluginWith { runtimeInputs = pluginRuntimeInputs name; } name;
+    package = dripPlugins.mkPluginWith {
+      runtimeInputs = pluginRuntimeInputs name;
+      runtimeEnv = pluginRuntimeEnv name;
+    } name;
   }) cfg.plugins;
 
   # `extraPlugins` states its ids rather than reading them, because the whole
@@ -350,6 +361,46 @@ in
         `null` disables the injection: bd then has to be on the herdr
         server's PATH by some other means, and the rail stays empty until
         it is.
+      '';
+    };
+
+    beadsSettings = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          HERDR_DRIP_BEADS_ROWS = "3";
+          HERDR_DRIP_BEADS_STATUSES = "blocked,in_progress";
+          HERDR_DRIP_BEADS_INTERVAL = "30";
+        }
+      '';
+      description = ''
+        Settings for the beads plugin, as environment variables set on its own
+        commands and its board binary — and on nothing else, the same scoping
+        `beadsPackage` gets.
+
+        This is the declarative half of the config file the rail and the board
+        share (`$HERDR_PLUGIN_CONFIG_DIR/config.json`, documented in
+        `beads/board/src/config.rs`): both read the environment first, so a
+        host can state what its rail and board look like without writing JSON
+        into a directory herdr manages, and without touching the herdr
+        server's environment.
+
+        The knobs, all optional:
+
+        - `HERDR_DRIP_BEADS_ROWS` — rows the rail draws (default 5);
+        - `HERDR_DRIP_BEADS_STATUSES` — comma-separated status vocabulary: an
+          order for the board, a filter for the rail;
+        - `HERDR_DRIP_BEADS_SHOW_CLOSED` — `1` to include closed beads;
+        - `HERDR_DRIP_BEADS_INTERVAL` — seconds between rail refreshes (15);
+        - `HERDR_DRIP_BEADS_LIMIT` — outer ceiling on beads written (40);
+        - `HERDR_DRIP_BEADS_CWD` — pin both surfaces to one repo instead of
+          following focus;
+        - `HERDR_DRIP_BD_BIN` — the `bd` to run, if not `beadsPackage`'s.
+
+        Set as DEFAULTS: the same variable in the herdr server's environment
+        still wins, because that is where somebody changes a setting for an
+        afternoon.
       '';
     };
 
