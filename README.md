@@ -555,6 +555,11 @@ same way the plugin directories curate everything else. Current set:
   repo*: a repo row shows its worktrees' agents and a worktree shows its
   siblings'. herdr models worktrees as sibling workspaces, and the agent view's
   filter language has no repo field to say so with. See below.
+- **rename-presets** — the rename dialog (and the one `New Tab` and `New Space`
+  open) offers six named kinds of work under its input, each behind a glyph,
+  each applied by one click. A plugin's `[[actions]]` reach the palette and the
+  keybindings; a `Mode`'s modal is compiled in and has no list to contribute a
+  row to. See below.
 
 They apply as one function, so every host gets the identical set:
 
@@ -995,6 +1000,86 @@ The plugin keeps sending that stock filter **unchanged**. This widens what the
 filter means on a patched herdr rather than inventing a shape only a patched
 herdr could parse — so drip.agent-scope on a stock herdr still works and simply
 stays exact, which is what it did until now.
+
+### rename-presets: six kinds of work, one click each
+
+```
+┌────────────────────────────────────────────────────┐
+│rename pane                                         │
+│                                                    │
+│ my-pane                                            │
+│─ presets ──────────────────────────────────────────│
+│   orchestration                                   │
+│   implementation                                  │
+│   research                                        │
+│   spike                                           │
+│   monitor                                         │
+│   misc                                            │
+│                                                    │
+│          ↵ save    ^c clear    esc cancel          │
+└────────────────────────────────────────────────────┘
+```
+
+The same dialog, plus a list. The input is untouched: type a name and press
+Enter exactly as before. **Clicking a preset row is a select and a confirm in
+one gesture** — it fills the field and saves, so the modal closes and the name
+is applied without a second keystroke. That is the whole feature; naming a pane
+`research` for the hundredth time should not cost a word and an Enter.
+
+| Preset | Glyph | For |
+| --- | --- | --- |
+|  orchestration | `cod-type_hierarchy` | the coordinator pane, driving workers |
+|  implementation | `cod-code` | feature work in a worktree |
+|  research | `cod-search` | a read-only investigation |
+|  spike | `cod-beaker` | a time-boxed throwaway experiment |
+|  monitor | `cod-pulse` | a log tail, a watch loop |
+|  misc | `cod-ellipsis` | one of the others |
+
+**The glyph is part of the name, not decoration beside it.** The row applies
+its string verbatim, so what lands on the pane is ` research` and the glyph is
+what you then read in the sidebar and the tab bar — which is the point of
+naming panes by kind at all. All six are Codicons from the U+EA60–U+EBEB block
+(taken from upstream's `glyphnames.json`, not from memory), single width, off
+the Material Design plane whose codepoints moved between Nerd Fonts v2 and v3.
+A font missing them draws six boxes and six rows that still read, because the
+word is right there.
+
+**It is one modal doing five jobs**, so the presets appear wherever herdr asks
+for a name: rename pane, rename tab, rename workspace, and the name prompts
+`New Tab` and `New Space` open before creating one. Saving means whatever it
+already meant in that mode — create the tab with this label, rename the pane —
+because the click returns herdr's own `Save` action rather than a second path
+that would have to re-learn all five.
+
+**The list is baked into the patch.** A configurable one is a config surface, a
+parser and a reload path for six strings that change about as often as the
+menu's wording does; when they do change, they change here, in one commit, for
+every host at once — the same bargain **pane-menu** makes.
+
+The layout notes, since a modal that lies about where its own rows are is the
+failure mode worth being careful about:
+
+- The popup grew from 7 rows to 14, and stock spelled that height as `56, 7` in
+  **two** places — the renderer that draws it and `rename_modal_inner` that
+  hit-tests it. Both now read one constant, so a later edit cannot move the
+  drawn dialog without moving the clickable one.
+- `save`/`clear`/`cancel` moved to the bottom, where every other herdr dialog
+  puts them. Not by rewriting their placement — `centered_button_row` puts them
+  three rows down from whatever rect it is handed, so both callers hand it the
+  bottom four rows of the modal and stock's arithmetic is left alone.
+- The preset rows the mouse can hit are the rows the renderer draws, from the
+  same function. On a terminal under 16 rows the popup is clamped smaller than
+  it asked for, and that function answers "no rows" to both — the dialog
+  degrades to stock's title/input/buttons rather than growing invisible live
+  regions.
+- Clicking anywhere else in the modal still cancels it, which is what stock
+  herdr does with every click that is not a button. The presets are asked
+  *before* that fallthrough; asked after it, each row would have been a row
+  that closes the dialog.
+
+There is no keyboard path to the rows on purpose: the keyboard already has one,
+and it is the input field. This is for the hand that is already on the mouse
+because it just right-clicked the pane.
 
 ## agent-scope: the agent list is about this space
 
