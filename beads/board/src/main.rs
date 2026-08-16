@@ -135,7 +135,8 @@ fn main() -> Result<()> {
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(out))?;
 
-    let res = run_app(&mut terminal, App::new(mode, scope));
+    let mut app = App::new(mode, scope);
+    let res = run_app(&mut terminal, &mut app);
 
     disable_raw_mode()?;
     execute!(
@@ -145,18 +146,28 @@ fn main() -> Result<()> {
     )?;
     terminal.show_cursor()?;
 
+    // DRIP CHANGE: `q` closes the pane, not just the process. See
+    // `App::close_pane` for why, and note the order -- the terminal is restored
+    // first, so a pane that herdr declines to close (the last pane of the only
+    // tab is a no-op) is left in a usable shell rather than in the alternate
+    // screen. Only on a clean quit: an error exit keeps the pane so its message
+    // can be read.
+    if res.is_ok() && app.should_quit {
+        app.close_pane();
+    }
+
     res
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<()> {
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     loop {
-        terminal.draw(|f| ui::render(f, &mut app))?;
+        terminal.draw(|f| ui::render(f, app))?;
         if app.should_quit {
             break;
         }
         match event::read()? {
-            Event::Key(k) if k.kind == KeyEventKind::Press => keys::handle_key(&mut app, k),
-            Event::Mouse(m) => keys::handle_mouse(&mut app, m),
+            Event::Key(k) if k.kind == KeyEventKind::Press => keys::handle_key(app, k),
+            Event::Mouse(m) => keys::handle_mouse(app, m),
             _ => {}
         }
         if app.should_quit {

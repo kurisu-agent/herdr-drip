@@ -379,6 +379,32 @@ impl App {
         }
     }
 
+    /// Close the pane this board lives in, on the way out of `q`.
+    ///
+    /// DRIP CHANGE. herdr does not close a pane when its process exits --
+    /// `pane.closed` and `pane.exited` are separate events -- so quitting the
+    /// board upstream leaves a dead pane holding its slot, and in a tab that is
+    /// a tab you now have to close by hand. Nothing about that is wrong for the
+    /// popup this was written as; it is wrong for the dock and the tab, which
+    /// are the two ways it opens here.
+    ///
+    /// Guarded on HERDR_PANE_ID because a popup does not get one, and unlike
+    /// `toggle_zoom` there is no `--current` fallback worth taking: closing
+    /// "whatever is focused" when we cannot identify ourselves would close
+    /// somebody else's pane. Failures are silent -- we are already exiting, the
+    /// TUI is gone, and there is nowhere left to put a status line.
+    pub fn close_pane(&self) {
+        let pane = std::env::var("HERDR_PANE_ID").unwrap_or_default();
+        if pane.is_empty() {
+            return;
+        }
+        let bin = std::env::var("HERDR_BIN_PATH").unwrap_or_else(|_| "herdr".to_string());
+        // `pane close` takes the id positionally; there is no --pane form.
+        let _ = std::process::Command::new(&bin)
+            .args(["pane", "close", &pane])
+            .output();
+    }
+
     pub fn retag(&mut self, dir: i32) {
         let Some(id) = self.selected.clone() else {
             return;

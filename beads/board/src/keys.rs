@@ -35,7 +35,7 @@ pub fn help_lines() -> Vec<(&'static str, &'static str)> {
         ("r", "refresh from bd"),
         ("f", "zoom pane fullscreen (toggle)"),
         ("? ", "this help"),
-        ("q", "quit"),
+        ("q", "quit, closing this pane"),
         ("Esc", "back out a layer (never quits)"),
     ]
 }
