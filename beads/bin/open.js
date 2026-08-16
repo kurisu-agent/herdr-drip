@@ -68,14 +68,37 @@ function ourPanes(entrypoint) {
 // stricter about it than we can be here -- it walks up for `.beads` and refuses
 // to guess -- so this is the belt to that braces, and matters most for the tab,
 // where the board becomes the focused pane and has nobody else's focus to read.
-function focusedCwd() {
+// The pane this was invoked FROM -- the focused one in OUR workspace, which is
+// not always the focused one full stop: a key press comes from the space you
+// are looking at, but `herdr plugin action invoke` from a shell elsewhere
+// carries that space's id while the open would land wherever the focus is.
+// Naming it keeps the open and the toggle talking about the same workspace;
+// otherwise a second press opens a second board instead of closing the first.
+function invokingPane() {
+  const ws = process.env.HERDR_WORKSPACE_ID ?? "";
   const all = panes();
-  const focused = all.find((pane) => pane?.focused === true) ?? all[0];
-  return focused?.foreground_cwd || focused?.cwd || "";
+  const mine = ws ? all.filter((pane) => pane?.workspace_id === ws) : all;
+  const from = mine.length > 0 ? mine : all;
+  return from.find((pane) => pane?.focused === true) ?? from[0] ?? null;
 }
 
-function openPane(entrypoint, extra) {
-  const cwd = focusedCwd();
+function openPane(entrypoint, placement) {
+  const from = invokingPane();
+  const cwd = from?.foreground_cwd || from?.cwd || "";
+  // How you name the workspace depends on the placement, and there is no form
+  // that works for both: a split "targets an existing pane; use
+  // target_pane_id" and rejects --workspace outright, while a tab rejects
+  // --target-pane and --direction. Both roads lead to the same space.
+  const where =
+    placement === "tab"
+      ? ["--placement", "tab", ...(process.env.HERDR_WORKSPACE_ID ? ["--workspace", process.env.HERDR_WORKSPACE_ID] : [])]
+      : [
+          "--placement",
+          "split",
+          "--direction",
+          "right",
+          ...(from?.pane_id ? ["--target-pane", from.pane_id] : []),
+        ];
   const args = [
     "plugin",
     "pane",
@@ -84,7 +107,7 @@ function openPane(entrypoint, extra) {
     PLUGIN_ID,
     "--entrypoint",
     entrypoint,
-    ...extra,
+    ...where,
     ...(cwd ? ["--env", `HERDR_DRIP_BEADS_CWD=${cwd}`] : []),
     "--focus",
   ];
@@ -122,24 +145,25 @@ function main() {
   }
 
   if (which === "tab") {
-    // `--target-pane` and `--direction` are rejected for a tab; `--workspace`
-    // would be accepted, and is left out so the tab lands in the one you are in.
-    openPane("tab", ["--placement", "tab"]);
+    openPane("tab", "tab");
     return;
   }
 
-  const paneId = openPane("dock", ["--placement", "split", "--direction", "right"]);
+  const paneId = openPane("dock", "split");
   dockLeft(paneId);
   // Split panes cannot be sized on open (width/height are popup-only), so the
   // column is narrowed afterwards. The direction is the dock's own side: it is
-  // on the left now, so its inner edge moves left to make it thinner.
+  // on the left now, so its inner edge moves left to make it thinner. `amount`
+  // is a DELTA and a split starts at 50/50, so 0.25 lands the dock at about a
+  // quarter of the tab -- enough for a glyph, an id and most of a title, which
+  // is what the list view is.
   herdr([
     "pane",
     "resize",
     "--direction",
     "left",
     "--amount",
-    "0.18",
+    "0.25",
     ...(paneId ? ["--pane", paneId] : ["--current"]),
   ]);
 }

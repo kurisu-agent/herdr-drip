@@ -26,13 +26,14 @@ let
     worktree-graph.node_modules = "${import ./worktree-graph-deps.nix pkgs}/node_modules";
 
     # The board binary, at the path beads/herdr-plugin.toml's [[panes]] command
-    # names — `./target/release/herdr-beads`, i.e. where the manifest's
-    # [[build]] would have put it. The leading `./` in the manifest is
-    # load-bearing (herdr hands the command to portable_pty's CommandBuilder,
-    # which only treats it as a path when it contains a `/`), which is also why
-    # this destination is two directories deep and the splice below has to
-    # mkdir first.
-    beads."target/release/herdr-beads" = "${import ./beads-board.nix pkgs}/bin/herdr-beads";
+    # names — which is cargo's own output path for the crate in beads/board,
+    # so that a store build and a `cargo build --release` in a linked working
+    # tree put the binary in the same place and the manifest needs no idea
+    # which one it got. The leading `./` in the manifest is load-bearing (herdr
+    # hands the command to portable_pty's CommandBuilder, which only treats it
+    # as a path when it contains a `/`), and this destination being three
+    # directories deep is why the splice below has to mkdir first.
+    beads."board/target/release/herdr-beads" = "${import ./beads-board.nix pkgs}/bin/herdr-beads";
   };
 
   # Generated content is excluded rather than trusted: on a flake build the

@@ -24,11 +24,12 @@ command = ["bin/watch"]
 # ---------------------------------------------------------------------------
 # The board, as three ways of opening one binary.
 #
-# `./target/release/herdr-beads` is where nix/beads-board.nix's build is
+# `./board/target/release/herdr-beads` is where nix/beads-board.nix's build is
 # spliced in (nix/drip-plugins.nix), standing in for the `[[build]]` this
 # manifest deliberately does not declare -- `herdr plugin link` never runs one
 # and a store path has no toolchain to run it with. On a LINKED WORKING TREE
-# there is no splice, so `cargo build --release` in board/ once, by hand.
+# there is no splice, so `cargo build --release` in board/ once, by hand: the
+# path is cargo's own output path so that both roads end in the same place.
 #
 # The leading `./` is load-bearing: herdr hands a pane command to portable_pty's
 # CommandBuilder, which only treats it as a path when it contains a `/` and
@@ -52,14 +53,14 @@ id = "dock"
 title = "\ueab3 Beads"  # cod-checklist
 description = "The board as a narrow column: list view, no detail pane"
 placement = "split"
-command = ["./target/release/herdr-beads", "--mode", "dock"]
+command = ["./board/target/release/herdr-beads", "--mode", "dock"]
 
 [[panes]]
 id = "tab"
 title = "\ueb30 Beads"  # cod-project
 description = "The board as a whole tab: kanban, with the detail pane open"
 placement = "tab"
-command = ["./target/release/herdr-beads", "--mode", "popup"]
+command = ["./board/target/release/herdr-beads", "--mode", "popup"]
 
 # The floating board. Declared but bound to no key: a popup has no pane id in
 # `pane list`, so nothing can find it again to toggle it closed -- and a
@@ -74,7 +75,7 @@ description = "The board as a floating popup over whatever you were doing"
 placement = "popup"
 width = "85%"
 height = "85%"
-command = ["./target/release/herdr-beads", "--mode", "popup"]
+command = ["./board/target/release/herdr-beads", "--mode", "popup"]
 
 [[actions]]
 id = "open-dock"
