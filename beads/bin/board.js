@@ -262,6 +262,33 @@ function loadBeads(cwd, wantClosed) {
   return [...beads, ...closed.filter((bead) => !have.has(bead?.id))];
 }
 
+function positiveInt(value, fallback) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// The totals line: `#<blocked> <in progress> <open>`, first line of the file.
+//
+// It exists because the rail's summary counts and the rail's rows are the same
+// data, and the row cap above would otherwise cap them both -- "○5" on a board
+// with forty open beads, which is a summary that tells you the size of its own
+// truncation. So the counts travel separately: the rail draws five rows and
+// says how many there are.
+//
+// Counted over what the rail WOULD show uncapped -- after the status filter,
+// before the cap -- so a filtered rail reports its own vocabulary rather than
+// counts it is not drawing.
+//
+// `#` cannot collide with a bead line: a bead's first character is a status
+// letter from a closed set, so an OLD reader drops this line as malformed and
+// draws the rail exactly as it did before, and a new reader with an old
+// writer's file finds no totals and counts the lines. Neither half has to know
+// what the other is.
+function totalsLine(beads) {
+  const count = (status) => beads.filter((bead) => bead?.status === status).length;
+  return `#${count("blocked")} ${count("in_progress")} ${count("open")}`;
+}
+
 // One line per bead: `<status><priority> <text>`, the format nix/sidebar-beads.rs
 // parses. Newlines cannot survive a line-per-bead file and a title carrying one
 // would silently become two beads, so they collapse to spaces here rather than
@@ -298,12 +325,20 @@ function main() {
   if (beads === null) process.exit(1);
   if (beads.length === 0) return;
 
-  // A ceiling, not a target. The rail shows what fits and the reader parses
-  // whatever it is given, so this only exists to keep a thousand-bead board
-  // from being re-read from disk twice a second for the twelve rows that
-  // will be drawn.
-  const limit = Number.parseInt(process.env.HERDR_DRIP_BEADS_LIMIT ?? "", 10);
-  const cap = Number.isInteger(limit) && limit > 0 ? limit : 40;
+  // Two ceilings, and they mean different things.
+  //
+  // ROWS is the rail's SHAPE: the open rail asks for a row per line it is
+  // given, so without a cap a forty-bead board pushes the agent panel down to
+  // its floor. Five is a glance -- worst first, so those five are the ones you
+  // would have read anyway.
+  //
+  // LIMIT is the old outer ceiling, and it stays for what it was for: not
+  // re-reading a thousand-bead board from disk twice a second. The smaller of
+  // the two wins, so setting LIMIT low still works and setting it high does
+  // not un-cap the rail.
+  const rows = positiveInt(process.env.HERDR_DRIP_BEADS_ROWS ?? CONFIG.rail_rows, 5);
+  const limit = positiveInt(process.env.HERDR_DRIP_BEADS_LIMIT, 40);
+  const cap = Math.min(rows, limit);
 
   // `closed` is gated by its own setting even when listed, so that one key
   // means the same thing on both surfaces: the board special-cases closed in
@@ -315,21 +350,21 @@ function main() {
     return allowed === null || allowed.includes(status);
   };
 
-  const lines = beads
-    .filter(keep)
-    .sort((a, b) => {
-      const byStatus = statusRank(a?.status) - statusRank(b?.status);
-      if (byStatus !== 0) return byStatus;
-      const byPriority = priorityOf(a?.priority) - priorityOf(b?.priority);
-      if (byPriority !== 0) return byPriority;
-      return String(b?.updated_at ?? "").localeCompare(String(a?.updated_at ?? ""));
-    })
+  const showing = beads.filter(keep).sort((a, b) => {
+    const byStatus = statusRank(a?.status) - statusRank(b?.status);
+    if (byStatus !== 0) return byStatus;
+    const byPriority = priorityOf(a?.priority) - priorityOf(b?.priority);
+    if (byPriority !== 0) return byPriority;
+    return String(b?.updated_at ?? "").localeCompare(String(a?.updated_at ?? ""));
+  });
+
+  const lines = showing
     .map(railLine)
     .filter((line) => line !== null)
     .slice(0, cap);
 
   if (lines.length > 0) {
-    process.stdout.write(`${lines.join("\n")}\n`);
+    process.stdout.write(`${totalsLine(showing)}\n${lines.join("\n")}\n`);
   }
 }
 

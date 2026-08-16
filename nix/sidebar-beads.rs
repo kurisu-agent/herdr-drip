@@ -95,52 +95,114 @@ fn drip_beads_state_dir() -> Option<std::path::PathBuf> {
     Some(state.join("herdr-drip"))
 }
 
+/// One read of the file: the rows to draw, and what the writer says the whole
+/// board holds.
+///
+/// The two are not the same number any more. The writer caps the rows it sends
+/// -- the open rail asks for a row per line, so an uncapped board would push
+/// the agent panel to its floor -- and a summary counted from five rows would
+/// report the size of its own truncation rather than the size of the board.
+#[derive(Clone, Default)]
+pub(crate) struct DripBeadFrame {
+    lines: Vec<DripBeadLine>,
+    totals: Option<[usize; 3]>,
+}
+
 /// The rail's beads, re-read at most every [`DRIP_BEADS_POLL`].
 pub(crate) fn drip_beads_lines() -> Vec<DripBeadLine> {
+    drip_beads_frame().lines
+}
+
+/// What the writer says the board holds, in [`drip_bead_counts`]' order, or
+/// `None` from a writer that does not say (an older drip, or anything else
+/// feeding this format).
+pub(crate) fn drip_beads_totals() -> Option<[usize; 3]> {
+    drip_beads_frame().totals
+}
+
+fn drip_beads_frame() -> DripBeadFrame {
     struct Cache {
         checked: Option<std::time::Instant>,
-        lines: Vec<DripBeadLine>,
+        frame: DripBeadFrame,
     }
     static CACHE: std::sync::OnceLock<std::sync::Mutex<Cache>> = std::sync::OnceLock::new();
 
     let cache = CACHE.get_or_init(|| {
         std::sync::Mutex::new(Cache {
             checked: None,
-            lines: Vec::new(),
+            frame: DripBeadFrame::default(),
         })
     });
     // A poisoned lock means some other thread panicked mid-read. The rail is
     // decoration: take the empty answer rather than propagating the panic into
     // a draw.
     let Ok(mut cache) = cache.lock() else {
-        return Vec::new();
+        return DripBeadFrame::default();
     };
     if cache.checked.is_some_and(|at| at.elapsed() < DRIP_BEADS_POLL) {
-        return cache.lines.clone();
+        return cache.frame.clone();
     }
     cache.checked = Some(std::time::Instant::now());
-    cache.lines = drip_read_beads();
-    cache.lines.clone()
+    cache.frame = drip_read_beads();
+    cache.frame.clone()
 }
 
 /// Read and parse the file. Every failure -- no path, no file, unreadable,
 /// stale, malformed -- is the same answer: no beads, and the sidebar looks like
 /// stock herdr.
-fn drip_read_beads() -> Vec<DripBeadLine> {
+fn drip_read_beads() -> DripBeadFrame {
     let Some(path) = drip_beads_path() else {
-        return Vec::new();
+        return DripBeadFrame::default();
     };
     let fresh = std::fs::metadata(&path)
         .and_then(|meta| meta.modified())
         .map(|at| at.elapsed().is_ok_and(|age| age <= DRIP_BEADS_STALE))
         .unwrap_or(false);
     if !fresh {
-        return Vec::new();
+        return DripBeadFrame::default();
     }
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return Vec::new();
+        return DripBeadFrame::default();
     };
-    text.lines().filter_map(drip_parse_bead).collect()
+    drip_parse_frame(&text)
+}
+
+/// The whole file: bead rows, plus the first totals line if there is one.
+/// Order does not matter and neither does duplication -- the last totals line
+/// wins -- because the one thing that must not happen is a line neither half
+/// recognises changing what the other draws.
+fn drip_parse_frame(text: &str) -> DripBeadFrame {
+    let mut frame = DripBeadFrame::default();
+    for line in text.lines() {
+        if let Some(totals) = drip_parse_totals(line) {
+            frame.totals = Some(totals);
+        } else if let Some(bead) = drip_parse_bead(line) {
+            frame.lines.push(bead);
+        }
+    }
+    frame
+}
+
+/// `#<blocked> <in progress> <open>` -> the board's counts.
+///
+/// `#` is a character no bead line can start with (a status is one of a closed
+/// set of letters), which is what makes this back-compatible in both
+/// directions: a herdr without this reads the line as malformed and drops it,
+/// and a writer without it leaves the counts to be taken from the rows, as
+/// they always were.
+fn drip_parse_totals(line: &str) -> Option<[usize; 3]> {
+    let rest = line.strip_prefix('#')?;
+    let mut fields = rest.split_whitespace();
+    let mut counts = [0usize; 3];
+    for slot in counts.iter_mut() {
+        *slot = fields.next()?.parse().ok()?;
+    }
+    // A fourth field is a format this does not know rather than one it can
+    // half-read: refuse it, and count the rows instead.
+    if fields.next().is_some() {
+        return None;
+    }
+    Some(counts)
 }
 
 /// `<status><priority> <text>` -> a bead. Anything else is dropped: a
@@ -229,6 +291,22 @@ fn drip_bead_priority_color(priority: char, p: &Palette) -> ratatui::style::Colo
 pub(crate) fn drip_bead_counts(lines: &[DripBeadLine]) -> [(char, usize); 3] {
     let count = |want: char| lines.iter().filter(|line| line.status == want).count();
     [('b', count('b')), ('i', count('i')), ('o', count('o'))]
+}
+
+/// The same three counts, preferring what the WRITER said the board holds.
+///
+/// The rows are capped -- five of them, by default -- so counting them answers
+/// "how much of the board is on screen", which is a question nobody asked. The
+/// totals line answers the one the summary is for. Without it (an older
+/// writer, or anything else feeding this format) the rows are all there is,
+/// and counting them is what this always did.
+fn drip_bead_counts_with(lines: &[DripBeadLine], totals: Option<[usize; 3]>) -> [(char, usize); 3] {
+    match totals {
+        Some([blocked, in_progress, open]) => {
+            [('b', blocked), ('i', in_progress), ('o', open)]
+        }
+        None => drip_bead_counts(lines),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -557,8 +635,19 @@ pub(crate) fn drip_render_beads(
     // -- and there a caret reading from the flag would turn `▸` to `▾` over an
     // unchanged rail, which reads as the click having failed rather than as
     // there being nowhere to put the answer.
+    // The counts come from the frame rather than from `lines`, which is capped
+    // by the writer: see [`drip_bead_counts_with`]. Read here rather than
+    // passed in, because the patch anchors hand this function the rows and
+    // nothing else, and this is a cached read of a file that was already read
+    // to produce them.
     frame.render_widget(
-        Paragraph::new(drip_beads_summary_line(lines, summary.width, body_h > 0, p)),
+        Paragraph::new(drip_beads_summary_line(
+            lines,
+            drip_beads_totals(),
+            summary.width,
+            body_h > 0,
+            p,
+        )),
         summary,
     );
 
@@ -602,6 +691,7 @@ pub(crate) fn drip_render_beads(
 /// not the same as the open flag: see the caller.
 fn drip_beads_summary_line(
     lines: &[DripBeadLine],
+    totals: Option<[usize; 3]>,
     width: u16,
     showing: bool,
     p: &Palette,
@@ -620,7 +710,7 @@ fn drip_beads_summary_line(
     )];
 
     let mut counts: Vec<(String, ratatui::style::Color)> = Vec::new();
-    for (status, count) in drip_bead_counts(lines) {
+    for (status, count) in drip_bead_counts_with(lines, totals) {
         if count == 0 {
             continue;
         }
@@ -747,6 +837,53 @@ mod drip_beads_tests {
             bead('c', '2', "e"),
         ];
         assert_eq!(drip_bead_counts(&lines), [('b', 1), ('i', 1), ('o', 2)]);
+    }
+
+    #[test]
+    fn drip_parse_totals_reads_three_counts() {
+        assert_eq!(drip_parse_totals("#3 2 42"), Some([3, 2, 42]));
+        assert_eq!(drip_parse_totals("#0 0 0"), Some([0, 0, 0]));
+    }
+
+    #[test]
+    fn drip_parse_totals_rejects_anything_else() {
+        // No marker, too few fields, a fourth field from a format this does
+        // not know, and a bead line -- which must stay a bead line.
+        assert!(drip_parse_totals("3 2 42").is_none());
+        assert!(drip_parse_totals("#3 2").is_none());
+        assert!(drip_parse_totals("#3 2 42 7").is_none());
+        assert!(drip_parse_totals("#3 2 x").is_none());
+        assert!(drip_parse_totals("b0 dr-14 turnpike egress").is_none());
+    }
+
+    #[test]
+    fn drip_parse_frame_splits_totals_from_rows() {
+        let frame = drip_parse_frame("#3 2 42\nb0 dr-14 turnpike\no1 dr-02 kart\n");
+        assert_eq!(frame.totals, Some([3, 2, 42]));
+        assert_eq!(frame.lines.len(), 2);
+        assert_eq!(frame.lines[0].status, 'b');
+    }
+
+    #[test]
+    fn drip_parse_frame_without_totals_is_the_old_format() {
+        let frame = drip_parse_frame("b0 dr-14 turnpike\no1 dr-02 kart\n");
+        assert_eq!(frame.totals, None);
+        assert_eq!(frame.lines.len(), 2);
+    }
+
+    #[test]
+    fn drip_bead_counts_with_prefers_the_writers_totals() {
+        // Five rows of a forty-two-bead board: the summary reports the board.
+        let lines = vec![bead('b', '0', "a"), bead('i', '1', "b"), bead('o', '1', "c")];
+        assert_eq!(
+            drip_bead_counts_with(&lines, Some([3, 2, 42])),
+            [('b', 3), ('i', 2), ('o', 42)]
+        );
+        // And with nothing said, the rows are all there is.
+        assert_eq!(
+            drip_bead_counts_with(&lines, None),
+            [('b', 1), ('i', 1), ('o', 1)]
+        );
     }
 
     #[test]

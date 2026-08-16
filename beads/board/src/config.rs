@@ -20,7 +20,8 @@
 //! ```json
 //! {
 //!   "statuses": ["blocked", "in_progress", "open"],
-//!   "show_closed": false
+//!   "show_closed": false,
+//!   "rail_rows": 5
 //! }
 //! ```
 //!
@@ -31,6 +32,9 @@
 //!     nothing but a filter, and keeps its own worst-first order.
 //!   - `show_closed` — the board's starting state for `C`, and whether the
 //!     rail may show closed beads at all.
+//!   - `rail_rows` — how many rows the rail draws. Rail-only, and documented
+//!     here anyway because this comment is the format's one description; the
+//!     board takes whatever room its pane has.
 //!
 //! Env wins over file, which is the layering the rail's other knobs already
 //! have and what lets a nix module set these without writing a file:
