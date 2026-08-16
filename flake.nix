@@ -48,6 +48,11 @@
           # nix/worktree-graph-deps.nix when bun.lock moves.
           worktree-graph-node-modules = import ./nix/worktree-graph-deps.nix pkgs;
 
+          # The beads plugin's board binary on its own, so it can be built and
+          # run (`--selftest`) without linking a plugin: nix/drip-plugins.nix
+          # splices this into plugin-beads at the path its manifest names.
+          beads-board = import ./nix/beads-board.nix pkgs;
+
           # Everything the drip needs at runtime, resolved against the herdr
           # SERVER's PATH, in one profile add: yolo-shell (default_shell),
           # bun (worktree-graph's [[build]] and pane command), python3 (the

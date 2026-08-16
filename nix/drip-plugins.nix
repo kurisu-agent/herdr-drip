@@ -24,6 +24,15 @@ let
     # bun only honours a directory named exactly `node_modules` — see the
     # installPhase comment in nix/worktree-graph-deps.nix.
     worktree-graph.node_modules = "${import ./worktree-graph-deps.nix pkgs}/node_modules";
+
+    # The board binary, at the path beads/herdr-plugin.toml's [[panes]] command
+    # names — `./target/release/herdr-beads`, i.e. where the manifest's
+    # [[build]] would have put it. The leading `./` in the manifest is
+    # load-bearing (herdr hands the command to portable_pty's CommandBuilder,
+    # which only treats it as a path when it contains a `/`), which is also why
+    # this destination is two directories deep and the splice below has to
+    # mkdir first.
+    beads."target/release/herdr-beads" = "${import ./beads-board.nix pkgs}/bin/herdr-beads";
   };
 
   # Generated content is excluded rather than trusted: on a flake build the
@@ -34,6 +43,7 @@ let
   ignored = [
     "node_modules"
     "dist"
+    "target"
     ".git"
   ];
 
@@ -53,18 +63,27 @@ rec {
   mkPlugin = mkPluginWith { };
 
   # As `mkPlugin`, but with `runtimeInputs` spliced onto the PATH of every
-  # command in the plugin's own bin/ — the idiom claude-agent-state.nix uses
-  # for python3, and for the same reason nix/plugins.nix gives for keeping
-  # python3 out of systemPackages: a tool with ONE consumer is scoped to that
-  # consumer instead of widening every interactive PATH.
+  # executable the plugin runs — the idiom claude-agent-state.nix uses for
+  # python3, and for the same reason nix/plugins.nix gives for keeping python3
+  # out of systemPackages: a tool with ONE consumer is scoped to that consumer
+  # instead of widening every interactive PATH.
+  #
+  # "Every executable" is the plugin's own bin/ plus whatever buildOutputs
+  # spliced in, because the beads board needs the same `bd` bin/sync does and
+  # is a binary at target/release/ rather than a script in bin/. A spliced
+  # DIRECTORY (worktree-graph's node_modules) fails the -f test and is skipped.
   #
   # The wrapper leaves the manifest alone: `[[startup]] command = ["bin/watch"]`
-  # still names a file at that path, and the real script keeps resolving its
-  # own root through `dirname $BASH_SOURCE/..` because wrapProgram leaves the
-  # hidden original in the same bin/.
+  # and `[[panes]] command = ["./target/release/herdr-beads"]` still name files
+  # at those paths, and the real script keeps resolving its own root through
+  # `dirname $BASH_SOURCE/..` because wrapProgram leaves the hidden original
+  # beside it.
   mkPluginWith =
     { runtimeInputs ? [ ] }:
     name:
+    let
+      splices = buildOutputs.${name} or { };
+    in
     pkgs.runCommandLocal "drip-plugin-${name}"
       {
         nativeBuildInputs = lib.optional (runtimeInputs != [ ]) pkgs.makeWrapper;
@@ -73,12 +92,15 @@ rec {
         cp -R ${pluginSrc name} $out
         chmod -R u+w $out
         ${lib.concatStrings (
-          lib.mapAttrsToList (destination: source: "ln -s ${source} $out/${destination}\n") (
-            buildOutputs.${name} or { }
-          )
+          lib.mapAttrsToList (destination: source: ''
+            mkdir -p "$(dirname "$out/${destination}")"
+            ln -s ${source} $out/${destination}
+          '') splices
         )}
         ${lib.optionalString (runtimeInputs != [ ]) ''
-          for command in "$out"/bin/*; do
+          for command in "$out"/bin/* ${
+            lib.concatMapStringsSep " " (destination: "\"$out\"/${destination}") (lib.attrNames splices)
+          }; do
             [ -f "$command" ] && [ -x "$command" ] || continue
             wrapProgram "$command" --prefix PATH : ${lib.makeBinPath runtimeInputs}
           done

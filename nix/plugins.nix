@@ -72,10 +72,16 @@ let
 
   dripPlugins = import ./drip-plugins.nix pkgs;
 
-  # bd reaches the beads plugin and nothing else. Its only consumer is that
-  # plugin's bin/, so it is scoped there rather than added to systemPackages —
-  # see the comment on environment.systemPackages below, and the identical
-  # call python3 gets in claude-agent-state.nix.
+  # bd reaches the beads plugin and nothing else. Its only consumers are that
+  # plugin's bin/ and its board binary, so it is scoped there rather than added
+  # to systemPackages — see the comment on environment.systemPackages below,
+  # and the identical call python3 gets in claude-agent-state.nix.
+  #
+  # ONE bd for both surfaces, deliberately. The rail only ever read; the board
+  # writes (claim, close, priority), and the first write by a newer bd migrates
+  # the on-disk schema of a live board that an older one then refuses — the
+  # hazard `beadsPackage`'s description spells out. Two pins here would be that
+  # hazard inside a single plugin.
   pluginRuntimeInputs = name: lib.optional (name == "beads" && cfg.beadsPackage != null) cfg.beadsPackage;
 
   # Where the published plugin directories live. Also the marker this module
