@@ -790,5 +790,110 @@ herdrPkg.overrideAttrs (old: {
     # anywhere in a card still opens that workspace's menu.
     substituteInPlace src/app/input/mouse.rs \
       --replace-fail '                    if let Some(idx) = self.workspace_at_row(mouse.row) {' '                    if self.drip_toggle_tab_tree_at(mouse.column, mouse.row) { return None; } if let Some((ws_idx, pane_id)) = self.drip_sidebar_tab_target_at(mouse.row) { self.mode = Mode::Terminal; return Some(MouseAction::FocusPane { ws_idx, pane_id }); } if let Some(idx) = self.workspace_at_row(mouse.row) {'
+
+    # rename-presets: six named kinds of work in the rename dialog, one click
+    # each. The modal that names a pane, a tab or a space — and the one the
+    # `New Tab` and `New Space` gestures open to name what they are about to
+    # create — grows a list of presets under its input: `orchestration`,
+    # `implementation`, `research`, `spike`, `monitor`, `misc`, each behind a
+    # Codicon that is part of the name and therefore visible afterwards in the
+    # sidebar and the tab bar. Clicking one is the whole gesture: it fills the
+    # field and saves in the same click, so naming a pane is one click rather
+    # than a word typed the same way for the hundredth time and an Enter.
+    #
+    # No plugin surface reaches it, and not narrowly: a plugin's reach is
+    # `[[actions]]` (the palette and the keybindings), pane placements
+    # (overlay/popup/split/tab/zoomed) and the sidebar's per-row tokens. The
+    # rename modal is none of those — it is a `Mode`, drawn by
+    # `render_rename_overlay` and hit-tested by `handle_mouse`, both compiled
+    # in, with no list for anyone to contribute a row to. The nearest a plugin
+    # could get is an action that renames a pane it already knows the id of,
+    # which is a different gesture entirely: it cannot be reached from the
+    # dialog you are already looking at, and it cannot see what you are
+    # naming.
+    #
+    # Two halves, for the reason the pane menu has two: the names and their
+    # geometry go in app/state.rs, which `ui::dialogs` and `app::input::mouse`
+    # can both name; the drawing goes in ui/dialogs.rs, which is where a
+    # `Frame` is.
+    cat ${./rename-presets.rs} >> src/app/state.rs
+    cat ${./rename-presets-render.rs} >> src/ui/dialogs.rs
+
+    # The modal grows to fit them. Stock passes `56, 7` in two places that have
+    # to agree to the row — the renderer sizes the popup it DRAWS and
+    # `rename_modal_inner` sizes the popup it HIT-TESTS — so both are pointed
+    # at one constant rather than at a second literal. A modal drawn 14 rows
+    # tall and hit-tested as 7 would put every button and every preset row
+    # somewhere other than where it appears.
+    substituteInPlace src/ui/dialogs.rs \
+      --replace-fail '    let Some(inner) = render_modal_shell(frame, area, 56, 7, &app.palette) else {' '    let Some(inner) = render_modal_shell(frame, area, 56, crate::app::state::DRIP_RENAME_POPUP_HEIGHT, &app.palette) else {'
+
+    substituteInPlace src/app/input/overlays.rs \
+      --replace-fail '        self.onboarding_modal_inner(56, 7)' '        self.onboarding_modal_inner(56, crate::app::state::DRIP_RENAME_POPUP_HEIGHT)'
+
+    # The draw, and the action row moving to the bottom of the taller modal.
+    #
+    # `save`/`clear`/`cancel` are placed by `centered_button_row` at a fixed
+    # offset of 3 from the top of the rect it is handed, which in stock's
+    # 5-row inner was the last row but in a 12-row one is the middle of it —
+    # buttons stranded above the presets, with the modal's floor empty. Rather
+    # than rewrite that offset (a multi-line anchor, at the mercy of nix's
+    # indented-string stripping), both callers hand the function the BOTTOM
+    # FOUR ROWS of the modal, whose row 3 is the modal's last. Stock's
+    # arithmetic is untouched and the buttons land where every other dialog in
+    # herdr puts them.
+    substituteInPlace src/ui/dialogs.rs \
+      --replace-fail '    let (save_rect, clear_rect, cancel_rect) = rename_button_rects(inner);' '    drip_render_rename_presets(frame, inner, &app.palette); let (save_rect, clear_rect, cancel_rect) = rename_button_rects(crate::app::state::drip_rename_button_area(inner));'
+
+    # The hit test's half of that move. This line and the one above are the
+    # function's only two NON-TEST callers, which is what makes the shift safe
+    # to do at the call sites: the buttons you can see and the buttons you can
+    # click are computed from the same rect, one line apart in this file. The
+    # two test callers are handled below.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '                        .map(crate::ui::rename_button_rects)' '                        .map(|inner| crate::ui::rename_button_rects(crate::app::state::drip_rename_button_area(inner)))'
+
+    # The click that applies a preset, asked BEFORE the buttons because the
+    # fallthrough below it is `unwrap_or(ModalAction::Cancel)` — in stock
+    # herdr every click that is not a button closes the dialog, so a preset row
+    # asked afterwards would be a row that cancels. Setting `name_input` and
+    # returning `Save` is deliberately the SAME path the save button takes:
+    # one click is a select and a confirm, and everything that already knows
+    # what saving means in each rename mode (create the tab, create the space,
+    # rename the pane, close the modal) keeps deciding it.
+    #
+    # `name_input_replace_on_type` is cleared alongside for the same reason
+    # herdr's own `clear` action clears it: it is the "the next keystroke
+    # replaces this" flag, and what is in the field is now a deliberate choice
+    # rather than a prefilled suggestion. Nothing reads it after the modal
+    # closes, so this only matters if a later herdr keeps the dialog open.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '                    let action = self' '                    if let Some(preset) = self.rename_modal_inner().and_then(|inner| crate::app::state::drip_rename_preset_at(inner, mouse.column, mouse.row)) { self.name_input = preset.to_string(); self.name_input_replace_on_type = false; return Some(MouseAction::RenameModal(ModalAction::Save)); } let action = self'
+
+    # herdr's own caret tests reproduce the modal's layout from a copy of that
+    # `56, 7`, and a taller popup is centred higher — so the same constant goes
+    # in, and `cargo test` on a patched checkout still measures the dialog it
+    # is looking at. The nix build does not run them (`doCheck = false`) and
+    # neither does check-herdr-patches.sh; this is for whoever builds a patched
+    # tree by hand.
+    substituteInPlace src/ui/dialogs.rs \
+      --replace-fail '        let popup = super::centered_popup_rect(area, 56, 7).expect("popup fits");' '        let popup = super::centered_popup_rect(area, 56, crate::app::state::DRIP_RENAME_POPUP_HEIGHT).expect("popup fits");'
+
+    # And the OTHER test caller of `rename_button_rects`, for the same reason.
+    # `clicking_rename_save_submits_workspace_rename_through_api_path` asks
+    # `rename_modal_inner` where the modal is and then asks stock's
+    # `rename_button_rects` where `save` is inside it — so with the modal
+    # taller and the action row moved to its floor, it would click row 3 of a
+    # 12-row inner, which is now the presets' rule row: no preset, no button,
+    # and `unwrap_or(ModalAction::Cancel)` closes the dialog without renaming
+    # anything. The test would fail on a rename the real dialog performs fine.
+    # Routing it through the same `drip_rename_button_area` the handler uses
+    # keeps it clicking the button it means to click.
+    #
+    # Its sibling in `app/input/modal.rs` needs nothing: it feeds the rect it
+    # computed straight back into `modal_action_from_buttons`, so it is
+    # self-consistent at any offset.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '        let (save, _, _) = crate::ui::rename_button_rects(inner);' '        let (save, _, _) = crate::ui::rename_button_rects(crate::app::state::drip_rename_button_area(inner));'
   '';
 })
