@@ -9,6 +9,15 @@
 #
 # The rail is a hardcore plugin (nix/herdr-patches.nix) that reads that one
 # file. No file, no rail — so a box without gumbo needs nothing turned off.
+#
+# THAT SILENCE IS ONLY FOR THE BOX WITH NO GUMBO. Where gumbo IS installed
+# somebody meant to have a rail, and a watcher that cannot produce one has to
+# say so in the only channel the rail has: the file. Otherwise the failure
+# looks exactly like success with nothing to show — which is how `dr-vsv2 —
+# The gumbo accounts rail never shows in a kart: the sidebar patch renders a
+# state file that nothing in a kart writes` stayed invisible on every kart
+# ever booted. So this script never gives up, and while it is failing it keeps
+# a one-row status in the file rather than leaving stale numbers or nothing.
 set -uo pipefail
 
 out=${HERDR_DRIP_ACCOUNTS_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip/sidebar-accounts.txt}
@@ -33,23 +42,64 @@ if ! command -v gumbo >/dev/null 2>&1; then
   exit 0
 fi
 
-# A watcher that exits immediately is telling us something permanent — no
-# store on this box, an unreadable config, no accounts. Retrying that forever
-# would be a log full of the same line, so give up after a few and say why.
+# Put a single row in the rail, in gumbo's own tagged format: `<grade><kind>
+# <text>`, graded `-` so the sidebar paints it as "nothing could be read"
+# rather than as a claim about somebody's headroom. Written through a temp and
+# renamed, the same way gumbo writes its frames, so a reader never sees half a
+# file. Best-effort throughout: a rail that cannot say it is broken must not
+# take the watcher down with it.
+rail_status() {
+  local text=$1 dir tmp
+  dir=$(dirname -- "$out")
+  mkdir -p -- "$dir" 2>/dev/null || return 0
+  tmp=$dir/.$(basename -- "$out").status.$$
+  printf -- '-a  ⚠ %s\n' "$text" > "$tmp" 2>/dev/null || { rm -f -- "$tmp"; return 0; }
+  mv -f -- "$tmp" "$out" 2>/dev/null || rm -f -- "$tmp"
+  return 0
+}
+
+# A watcher that exits immediately is telling us something — no store on this
+# box, an unreadable config, a daemon that is not up. In a kart at boot the
+# last of those is NORMAL and temporary: `kart-gumbo-config` materialises the
+# endpoint while everything else is starting, so the first few attempts can
+# lose that race. This used to give up after five of them, permanently, which
+# turned a thirty-second startup order problem into a rail that was dead until
+# somebody restarted herdr.
+#
+# So: retry forever, backing off 30s → 5m so a genuinely broken box costs one
+# log line every five minutes rather than a flood. The ceiling is under the
+# rail's staleness window (10m), which is what keeps the status row below fresh
+# enough to be drawn — a slower backoff would let the rail fall silent again
+# between attempts.
+#
 # A watcher that ran for a while and then died (a daemon restart, a transient
-# store error) is worth respawning, and resets the count.
+# store error) is a different animal: the rail had real data until it stopped,
+# so the count resets, the backoff resets, and the last frame is left alone to
+# go stale on its own if the restart does not take.
+min_backoff=30
+max_backoff=300
 failures=0
+backoff=$min_backoff
 while :; do
   started=$SECONDS
   gumbo watch --format compact --tags --width "$width" --interval "$interval" --out "$out"
-  if ((SECONDS - started < 5)); then
-    ((failures++))
-    if ((failures >= 5)); then
-      echo "gumbo watch exited immediately $failures times; giving up on the accounts rail" >&2
-      exit 0
-    fi
-  else
+  status=$?
+  ran=$((SECONDS - started))
+  if ((ran >= 5)); then
+    echo "gumbo watch exited (status $status) after ${ran}s; restarting" >&2
     failures=0
+    backoff=$min_backoff
+  else
+    ((failures++))
+    # Only on the way in and on each backoff step, not once per attempt.
+    if ((failures == 1 || backoff == max_backoff)); then
+      echo "gumbo watch exited immediately (status $status), $failures time(s); retrying in ${backoff}s" >&2
+    fi
+    rail_status "feed down"
   fi
-  sleep 30
+  sleep "$backoff"
+  if ((backoff < max_backoff)); then
+    backoff=$((backoff * 2))
+    ((backoff > max_backoff)) && backoff=$max_backoff
+  fi
 done

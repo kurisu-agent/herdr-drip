@@ -513,15 +513,32 @@ Three pieces, deliberately:
   The two cadences are independent on purpose: the meters change slowly, but
   `▸` moves the moment a new session is placed, and only the daemon knows.
 - **`drip.gumbo-usage`** (this plugin) runs `gumbo watch --format compact
-  --tags --out <file>` from a `[[startup]]` hook and keeps it alive.
+  --tags --out <file>` from a `[[startup]]` hook and keeps it alive — retrying
+  with backoff for as long as the server lives, and writing a status row into
+  the same file while it cannot.
 - **the `sidebar-accounts` hardcore patch** reads that one file and draws it.
 
 The patch knows nothing about gumbo — it reads tagged lines
 (`<severity><kind> <text>`) and paints them. Anything that writes that format
-feeds the rail, and when nothing does, every function in it returns empty and
-the sidebar is byte-identical to stock herdr. A file older than ten minutes
-counts as nothing: a watcher that died leaves its last frame behind, and
-hour-old headroom shown as current is the number you would act on.
+feeds the rail.
+
+**No file and a dead feed are different facts, and the rail says which.** With
+no file at all every function returns empty and the sidebar is byte-identical
+to stock herdr — that is the box with no gumbo, and it stays silent. A file
+that exists but is older than ten minutes is a watcher that died: its last
+frame is not shown (hour-old headroom presented as current is the number you
+would act on), and in its place one grey row says how old the feed is. The
+watcher writes the same kind of row itself while it is failing, so `⚠ feed
+down` in the rail means the plugin is up and gumbo is not answering. This is
+what `dr-vsv2 — The gumbo accounts rail never shows in a kart: the sidebar
+patch renders a state file that nothing in a kart writes` cost: on a
+workstation you notice a rail that vanished, and in a kart nobody is looking.
+
+The one state still indistinguishable from "no gumbo here" is the plugin's
+startup hook never running at all — nothing writes the file, so there is
+nothing to read. That is a lifecycle problem rather than a display one, and
+the kart's copy of it is fixed in drift-rust's guest layer, where `herdr
+server` now starts after the drip's plugins are linked.
 
 Overrides, for a wider sidebar or a different cadence — set them in the herdr
 **server's** environment:
@@ -534,8 +551,13 @@ HERDR_DRIP_ACCOUNTS_INTERVAL  # default: 5 (seconds between redraws, NOT between
 
 `gumbo` must be on the herdr server's PATH — it is not a dependency of this
 repo, and a host without it simply gets no rail (the plugin says so once in its
-log and exits). `herdr plugin action invoke sync --plugin drip.gumbo-usage`
-redraws now, after a `gumbo login` or a `gumbo use`.
+log and exits, and that is the one failure it keeps quiet: with no gumbo
+installed there was never a rail to be missing). With gumbo present, the
+watcher retries for as long as the server lives — 30s doubling to 5 minutes,
+never giving up — because in a kart the first attempts race the unit that
+materialises gumbo's endpoint, and a permanent surrender there left the rail
+dead until somebody restarted herdr. `herdr plugin action invoke sync --plugin
+drip.gumbo-usage` redraws now, after a `gumbo login` or a `gumbo use`.
 
 ## beads: the board you are on, in the sidebar
 
