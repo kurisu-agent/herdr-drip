@@ -50,10 +50,51 @@ fn parse_args() -> (Mode, Scope, bool) {
     (mode, scope, selftest)
 }
 
+/// Does `dir`, or anything above it, hold a `.beads`?
+///
+/// DRIP CHANGE. Upstream tested `dir/.beads` and nothing else, which scores a
+/// shell sitting two levels inside a checkout at zero -- and cd'ing around
+/// inside a repo is the normal way to use one. `bd` itself walks up, and so
+/// does the rail (`beads/bin/board.js`'s `hasBoard`, which this is the port
+/// of); a board the tool would have answered from that exact cwd must not be
+/// invisible to the thing whose whole job is finding it.
+fn has_board(dir: &str) -> bool {
+    let mut at = std::path::Path::new(dir);
+    loop {
+        if at.join(".beads").exists() {
+            return true;
+        }
+        match at.parent() {
+            Some(up) => at = up,
+            None => return false,
+        }
+    }
+}
+
 /// Resolve the repo the board should scope to. herdr runs the pane in the
 /// plugin dir (no `.beads`), but injects HERDR_SOCKET_PATH / HERDR_WORKSPACE_ID
 /// / HERDR_PANE_ID / HERDR_BIN_PATH - so we ask `herdr pane list` for the
 /// focused pane's cwd in our workspace (same trick herdr-flist uses).
+///
+/// DRIP CHANGE, in two places, both ported from the rail's `boardCwd`
+/// (`beads/bin/board.js`) which had already met them:
+///
+///   - `foreground_cwd` is consulted before `cwd`, because a shell that has
+///     cd'd into a worktree is still reported at its launch directory and the
+///     worktree is the board you are looking at. It only wins while it is
+///     still ON a board, though -- a pane that cd'd out to /tmp should not
+///     lose a repo its launch directory can still name;
+///   - a score below 4 resolves to NOTHING rather than to the best of a bad
+///     lot. Upstream took the top-scoring pane whatever it scored, so a
+///     workspace with no board in it anywhere still picked some pane's home
+///     directory and the board opened on whatever `bd` says there. Refusing to
+///     guess leaves the process in the cwd the launcher gave it, which is the
+///     answer the launcher's `--env HERDR_DRIP_BEADS_CWD` was for.
+///
+/// Our own pane is still skipped, as upstream: we live in the plugin root.
+/// That is exactly why the `focused * 2` term earns nothing in a TAB, where
+/// the board IS the focused pane -- there, `has_board * 4` is the whole score,
+/// which is the other half of why the >= 4 floor matters.
 fn resolve_repo_cwd() -> Option<String> {
     let me = std::env::var("HERDR_PANE_ID").unwrap_or_default();
     let ws = std::env::var("HERDR_WORKSPACE_ID").unwrap_or_default();
@@ -73,38 +114,65 @@ fn resolve_repo_cwd() -> Option<String> {
         .iter()
         .filter(|p| p.get("pane_id").and_then(|x| x.as_str()).unwrap_or("") != me)
         .collect();
-    let cwd = |p: &serde_json::Value| p.get("cwd").and_then(|x| x.as_str()).map(String::from);
+    let field = |p: &serde_json::Value, k: &str| {
+        p.get(k)
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    };
+    let cwd = |p: &serde_json::Value| {
+        let fg = field(p, "foreground_cwd");
+        let launched = field(p, "cwd");
+        fg.clone()
+            .filter(|d| has_board(d))
+            .or_else(|| launched.clone().filter(|d| has_board(d)))
+            .or(fg)
+            .or(launched)
+    };
     let in_ws = |p: &serde_json::Value| {
         !ws.is_empty() && p.get("workspace_id").and_then(|x| x.as_str()) == Some(ws.as_str())
     };
     let focused = |p: &serde_json::Value| p.get("focused").and_then(|x| x.as_bool()) == Some(true);
-    let has_beads = |c: &str| std::path::Path::new(c).join(".beads").exists();
 
-    // Preference order: a pane with a real .beads dir wins (focused first, my
-    // workspace next), then any focused pane, then anything.
-    let mut candidates: Vec<String> = Vec::new();
+    // Preference order: a pane with a real board wins (focused first, my
+    // workspace next). Anything scoring under 4 is not on a board at all.
+    let mut best: Option<String> = None;
+    let mut best_score = 0;
     for p in &others {
         if let Some(c) = cwd(p) {
-            let score = (has_beads(&c) as u8) * 4 + (focused(p) as u8) * 2 + (in_ws(p) as u8);
-            candidates.push(format!("{score:02}\u{1}{c}"));
+            let score = (has_board(&c) as u8) * 4 + (focused(p) as u8) * 2 + (in_ws(p) as u8);
+            if score > best_score {
+                best_score = score;
+                best = Some(c);
+            }
         }
     }
-    candidates.sort();
-    candidates
-        .last()
-        .and_then(|s| s.split('\u{1}').nth(1))
-        .map(String::from)
+    if best_score >= 4 {
+        best
+    } else {
+        None
+    }
 }
 
 fn apply_working_dir() {
-    // 1) explicit override from the launcher
-    if let Ok(dir) = std::env::var("HERDR_BEADS_CWD") {
-        if !dir.is_empty() {
-            let _ = std::env::set_current_dir(&dir);
+    // 1) explicit override from the launcher. HERDR_DRIP_BEADS_CWD is the
+    //    rail's spelling of the same thing and the launchers here set it, so
+    //    one variable pins both surfaces to one repo; HERDR_BEADS_CWD is
+    //    upstream's and still wins, being the more specific of the two.
+    for var in ["HERDR_DRIP_BEADS_CWD", "HERDR_BEADS_CWD"] {
+        if let Ok(dir) = std::env::var(var) {
+            if !dir.is_empty() {
+                let _ = std::env::set_current_dir(&dir);
+            }
         }
     }
-    // 2) if still no .beads here, ask herdr for the workspace's repo
-    if !std::path::Path::new(".beads").exists() {
+    // 2) if there is still no board at or above here, ask herdr for one.
+    //    Resolved absolutely, because the walk up from a relative "." reaches
+    //    the top after one step and would only ever test the cwd itself.
+    let here = std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| ".".to_string());
+    if !has_board(&here) {
         if let Some(dir) = resolve_repo_cwd() {
             let _ = std::env::set_current_dir(&dir);
         }
