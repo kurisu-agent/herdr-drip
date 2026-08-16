@@ -56,23 +56,26 @@ let
   };
 in
 {
-  # The role alias matters as much as the rungs, and this one is the single
-  # place the drip departs from the palette it otherwise follows: nix-env's
-  # `accent` points at GREEN, and herdr's accent here is LAVENDER.
+  # An HONEST MIRROR of nix-env's palette, role layer included: its `accent`
+  # points at green and so does this.
   #
-  # The reason is that herdr spends `green` on a meaning of its own. It is the
-  # done/idle mark on an agent row (see the state colours below), so an accent
-  # of the same hue paints the active pane border, the selection and "this
-  # agent has finished" in one colour — the two things you scan a sidebar for,
-  # made indistinguishable. Lavender is the palette's own rung, so this is
-  # still a re-point rather than a new colour; it costs the agreement with
-  # zellij's green `ribbon_selected`, which is a real loss and a smaller one
-  # than the collision.
+  # It used to point at lavender, which is what herdr actually renders, and
+  # that was a lie in two directions at once — it made this vendored copy
+  # disagree with the palette it claims to mirror, and it fixed the colour in
+  # the one place almost nothing reads. Almost nothing, because a fleet host
+  # does not use this default at all: nix-env's `nixosModules.claude` sets
+  # `services.herdr-drip.plugins.theme.palette = lib.mkDefault <its palette>`,
+  # and an option DEFINITION at mkDefault outranks an option DEFAULT, so every
+  # host and every kart is themed from nix-env's palette and this attrset is
+  # only reached by a bare `nix eval` and by a host importing this module
+  # alone. Editing it therefore proved nothing and shipped nothing —
+  # `dr-gfxc — A kart's herdr accent is still the palette's green, not the
+  # workstation's lavender — the last of dr-50bg's four keys`.
   #
-  # It is a DEFAULT, not a rule: a host passing a palette whose `accent` role
-  # says otherwise gets that, exactly as before.
+  # Where herdr's accent actually comes from is `mkTheme` below, which is the
+  # only place that can state a rule instead of a value.
   defaultPalette = mocha // {
-    accent = mocha.lavender;
+    accent = mocha.green;
   };
 
   # The herdr settings a palette implies: `[theme.custom]` plus the legacy
@@ -85,8 +88,10 @@ in
   # herdr has no slot for them: a second selection surface (Catppuccin's
   # surface2), the darkest neutral (crust), and the accents herdr never
   # names — rosewater, flamingo, pink, maroon, sky, sapphire, lavender. No
-  # slot is not the same as unused: lavender has no token of its own and is
-  # still what `accent` resolves to under the default palette.
+  # slot is not the same as unused, and lavender is the case that matters:
+  # having no token of its own is precisely what makes it available to carry
+  # `accent` when the palette's accent role collides with a state colour. See
+  # the accent note in `mkTheme`.
   #
   # `transparentChrome` is the one input that is not a colour — see the note
   # at the top of this file for why it cannot be one.
@@ -101,7 +106,49 @@ in
       # role layer — it still themes herdr, it just cannot re-point a role.
       pick = role: name: palette.${role} or palette.${name};
 
-      accent = pick "accent" "green";
+      # THE ACCENT, and it is the one token where following the palette's role
+      # gives the wrong answer.
+      #
+      # herdr's accent paints active pane borders, the focused row and the
+      # selection. But herdr also spells SEVEN colours by name, and every one
+      # of them already means something in this UI (see the state block below):
+      # green is a finished agent, yellow a working one, red one that needs
+      # you. So an accent equal to any of those paints "focused" and "finished"
+      # — the two things you scan a sidebar for — in one colour, and the
+      # palette's `accent` role points at green, which is exactly that
+      # collision. That is why this workstation had lavender hand-set against a
+      # green role for as long as it did.
+      #
+      # So the rule, rather than the value: TAKE THE ROLE, unless the role is a
+      # hue herdr has already spent on a state. A palette pointing `accent` at
+      # something outside that vocabulary is followed exactly as before — set
+      # it to a pink and herdr goes pink. Only a collision is redirected, and
+      # it is redirected to `lavender`, which is the one accent rung in this
+      # palette that herdr has no token for and that the palette itself already
+      # reserves for structure rather than state (its `branch` role). A palette
+      # with no lavender keeps the colliding role: degraded, but not invented.
+      #
+      # It costs the agreement with zellij's green `ribbon_selected`. That is a
+      # real loss and the smaller one — zellij has no agent states to confuse
+      # its accent with, and herdr does.
+      #
+      # Comparison is by string, which is safe within one palette because every
+      # value in it comes from the same source and is spelled the same way; it
+      # is not a general colour-equality test and does not need to be.
+      roleAccent = pick "accent" "green";
+
+      herdrStateHues = [
+        palette.mauve
+        palette.green
+        palette.yellow
+        palette.red
+        palette.peach
+        palette.blue
+        palette.teal
+      ];
+
+      accent =
+        if builtins.elem roleAccent herdrStateHues then palette.lavender or roleAccent else roleAccent;
 
       # `reset` is herdr's spelling of "no colour here"; the parser takes it
       # wherever a token takes a hex (src/config/theme.rs), and it is what
@@ -168,6 +215,10 @@ in
         # teal in the palette while herdr's success colour is green, and
         # `branch` is lavender while herdr renders branch names with `mauve`.
         # Following the roles would leave herdr with two greens and no mauve.
+        #
+        # THIS LIST IS THE ACCENT RULE'S COLLISION SET (`herdrStateHues`
+        # above). Adding a token here takes its hue out of circulation for the
+        # accent; removing one puts it back. Keep the two in step.
         mauve = palette.mauve; # branch names, special labels
         green = palette.green; # done / idle
         yellow = palette.yellow; # working / running

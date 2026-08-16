@@ -47,11 +47,22 @@ auto_switch = false
 # uses the palette defaults where the workstation uses four hand-set values,
 # so their colour schemes cannot match`. Two of the four could not be closed
 # by editing a palette at all (`reset` is transparency, not a hue), which is
-# why `theme.transparentChrome` exists. That every line here is now the
-# generator's own output is one command to check, and README.md has it.
+# why `theme.transparentChrome` exists; the accent needed a RULE rather than a
+# value, and getting that wrong the first time cost a second ticket
+# (`dr-gfxc — A kart's herdr accent is still the palette's green, not the
+# workstation's lavender — the last of dr-50bg's four keys`). That every line
+# here is now the generator's own output is one command to check, and
+# README.md has it — but note that command renders the VENDORED default
+# palette, and a fleet host is themed from nix-env's. The accent rule is
+# checked against that shape separately (`checks.<system>.theme-accent-rule`).
 [theme.custom]
-accent = "#B4BEFE"      # lavender. Not the palette's `accent` role (green):
-                        # herdr spends green on done/idle agents.
+accent = "#B4BEFE"      # lavender, and DERIVED rather than chosen: the rule in
+                        # nix/theme.nix takes the palette's `accent` role unless
+                        # that role is a hue herdr already spends on a state.
+                        # It points at green, which is a finished agent here, so
+                        # it redirects to lavender — the one accent rung herdr
+                        # has no token for. Point the role at a colour outside
+                        # that vocabulary and herdr follows it.
 panel_bg = "reset"      # the terminal's own bg, so the chrome is transparent
 sidebar_bg = "reset"    # same, for the sidebar plane (herdr's own default)
 surface_dim = "#1E1E2E" # separators (bg -> base)
