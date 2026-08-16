@@ -686,6 +686,23 @@ this one is not.
 off, the same way a host without gumbo gets no accounts rail.
 `herdr plugin action invoke sync --plugin drip.beads` refreshes now.
 
+On a NixOS host the module supplies it, because "not installed" turned out to
+be the common case rather than the edge one: `bd` is typically a per-repo tool
+that only exists inside a devshell, so the herdr **server** — which is what
+runs this plugin — never sees it, and the rail stays empty on a box whose
+repos all have boards. `services.herdr-drip.plugins.beadsPackage` is spliced
+onto the PATH of this plugin's commands only (the treatment python3 gets in
+`nix/claude-agent-state.nix`, and for the reason `environment.systemPackages`
+gives for refusing it: one consumer, so one PATH). It defaults to the beads
+this flake pins.
+
+Override it on a host that already has a `bd` — a drift-rust circuit should
+pass `inputs.drift-rust.packages.${pkgs.system}.bd`. Two beads of different
+versions on one box is a real hazard, not tidiness: the first write by the
+newer one forward-migrates the shared on-disk Dolt schema and the older one
+then refuses to read it at all, with no downgrade. Which is also why the pin
+here moves in step with drift-rust's, never on its own.
+
 ## Hardcore plugins — patches on herdr itself
 
 Some of our opinions have no plugin surface to land on: sidebar chrome,

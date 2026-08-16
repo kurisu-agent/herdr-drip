@@ -3,8 +3,26 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+  # ── beads (`bd`) — the tracker the beads plugin reads ────────────────────────
+  # An input rather than `pkgs.beads` because nixpkgs pins 1.0.3, which
+  # predates the post-1.0 data-loss and scale fixes. The rail only ever runs
+  # `bd list --json`, but a read against a board another `bd` has already
+  # forward-migrated fails outright, so the version still has to be the one
+  # the boxes use.
+  #
+  # PINNED TO A TAG for the reason drift-rust pins the same tag: a newer bd's
+  # first WRITE migrates the on-disk Dolt schema of a live .beads database and
+  # every older bd then refuses it, with no downgrade. This is the default
+  # only — a host that already has beads (a drift-rust circuit) should point
+  # `services.herdr-drip.plugins.beadsPackage` at ITS bd so the box has one
+  # copy and one version. Bump this in step with drift-rust, never alone.
+  inputs.beads = {
+    url = "github:gastownhall/beads/v1.2.2";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, beads }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [
         "x86_64-linux"
@@ -213,7 +231,20 @@
         # link`, so the consumer's flake input decides exactly which plugin
         # code runs and `nix flake update herdr-drip` moves it — with no rev
         # to pin, no fetch at activation, and no dirty-checkout special case.
-        plugins = import ./nix/plugins.nix;
+        # Wrapped rather than imported bare so the module can carry THIS
+        # flake's pinned bd as the default for `beadsPackage` — a plain
+        # `import` would leave the module unable to name a beads at all, and
+        # the beads rail silently empty on every host that has no bd on the
+        # herdr server's PATH. Imported directly it still works: plugins.nix
+        # defaults the argument to null.
+        plugins =
+          {
+            pkgs,
+            ...
+          }@args:
+          import ./nix/plugins.nix (
+            args // { beadsDefault = beads.packages.${pkgs.stdenv.hostPlatform.system}.default; }
+          );
 
         # The standard procedure: both halves.
         default = {

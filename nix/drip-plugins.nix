@@ -50,17 +50,40 @@ rec {
   # work as a herdr plugin_root: commands run with it as cwd, and every
   # plugin writes to $HERDR_PLUGIN_STATE_DIR / $HERDR_PLUGIN_CONFIG_DIR
   # under $HOME instead of into its own root.
-  mkPlugin =
+  mkPlugin = mkPluginWith { };
+
+  # As `mkPlugin`, but with `runtimeInputs` spliced onto the PATH of every
+  # command in the plugin's own bin/ — the idiom claude-agent-state.nix uses
+  # for python3, and for the same reason nix/plugins.nix gives for keeping
+  # python3 out of systemPackages: a tool with ONE consumer is scoped to that
+  # consumer instead of widening every interactive PATH.
+  #
+  # The wrapper leaves the manifest alone: `[[startup]] command = ["bin/watch"]`
+  # still names a file at that path, and the real script keeps resolving its
+  # own root through `dirname $BASH_SOURCE/..` because wrapProgram leaves the
+  # hidden original in the same bin/.
+  mkPluginWith =
+    { runtimeInputs ? [ ] }:
     name:
-    pkgs.runCommandLocal "drip-plugin-${name}" { } ''
-      cp -R ${pluginSrc name} $out
-      chmod -R u+w $out
-      ${lib.concatStrings (
-        lib.mapAttrsToList (destination: source: "ln -s ${source} $out/${destination}\n") (
-          buildOutputs.${name} or { }
-        )
-      )}
-    '';
+    pkgs.runCommandLocal "drip-plugin-${name}"
+      {
+        nativeBuildInputs = lib.optional (runtimeInputs != [ ]) pkgs.makeWrapper;
+      }
+      ''
+        cp -R ${pluginSrc name} $out
+        chmod -R u+w $out
+        ${lib.concatStrings (
+          lib.mapAttrsToList (destination: source: "ln -s ${source} $out/${destination}\n") (
+            buildOutputs.${name} or { }
+          )
+        )}
+        ${lib.optionalString (runtimeInputs != [ ]) ''
+          for command in "$out"/bin/*; do
+            [ -f "$command" ] && [ -x "$command" ] || continue
+            wrapProgram "$command" --prefix PATH : ${lib.makeBinPath runtimeInputs}
+          done
+        ''}
+      '';
 
   # Every plugin directory in the repo, by name. `hello` is the template and
   # is deliberately not in nix/plugins.nix's default list, but it builds like
