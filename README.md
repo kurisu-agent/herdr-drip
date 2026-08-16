@@ -43,7 +43,8 @@ herdr plugin log list --plugin drip.hello
 `config/herdr.toml` is the drip's curated herdr config — keybindings layered
 under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Ctrl+b [` to flip a split,
 `Ctrl+b a` as a second way to widen or narrow the agent list — the icon in its
-header is the first — `Alt+Shift+arrows` for pane focus), sidebar rows wired to the plugins'
+header is the first — `Ctrl+b B`/`Ctrl+b O` for the bd board docked or in a
+tab, `Alt+Shift+arrows` for pane focus), sidebar rows wired to the plugins'
 `$worktree` token, a tab bar that hides itself while there is only one tab
 (`hide_tab_bar_when_single_tab` — one tab is not a choice, so the row showing
 it is a line of terminal spent on nothing), the colour scheme (below), and the
@@ -586,7 +587,7 @@ materialises gumbo's endpoint, and a permanent surrender there left the rail
 dead until somebody restarted herdr. `herdr plugin action invoke sync --plugin
 drip.gumbo-usage` redraws now, after a `gumbo login` or a `gumbo use`.
 
-## beads: the board you are on, in the sidebar
+## beads: the board you are on, in the sidebar — and the board itself
 
 > **Both halves of this plugin come from
 > [herdr-beads](https://github.com/miiraheart/herdr-beads) (MIT).** That project
@@ -595,8 +596,9 @@ drip.gumbo-usage` redraws now, after a `gumbo login` or a `gumbo use`.
 > status vocabulary and the glyphs below are all its. The rail described here is
 > a re-implementation for a surface it has no equivalent of: not a pane you open,
 > but one line of sidebar that is always there, and a click to unfold the rest.
-> The board is that project's own code, forked into `beads/board` —
-> `beads/board/UPSTREAM.md` records the rev it was taken at.
+> The board is that project's own code, forked into `beads/board` — see
+> [the board itself](#the-board-itself) below, and `beads/board/UPSTREAM.md`
+> for the rev it was taken at.
 
 Above the accounts rail, a summary line you can click:
 
@@ -644,37 +646,60 @@ worst status on the board — there is the board, and this is its temperature.
 
 Three pieces, the same shape gumbo-usage has:
 
-- **[`bd`](https://github.com/steveyegge/beads)** owns the board. Nothing here
-  writes to it.
+- **[`bd`](https://github.com/steveyegge/beads)** owns the board. Nothing in
+  the rail writes to it — the board pane below does, with the same `bd`.
 - **`drip.beads`** (this plugin) asks herdr which pane is focused, runs
   `bd list --json` in that pane's directory, and writes one line per bead to a
   file. Every call is an argv vector rather than a shell string, which is
   herdr-beads' discipline and worth keeping: bead titles are arbitrary text.
 - **the `sidebar-beads` hardcore patch** reads that one file and draws it.
 
-The rail **follows focus**, which the pane version had no need to: move to
-another repo and the rail is that repo's board. Focus decides only among panes
+The rail **follows focus**, which the board pane resolves once at startup and
+then keeps: move to another repo and the rail is that repo's board, while the
+board you opened is still the board you opened. Focus decides only among panes
 that are *on* a board, though — move to one that has no `.beads` anywhere above
 it and the rail keeps showing whichever other pane's board it can find, rather
 than going blank because the pane you happen to be typing in is not a repo.
 That is what the 15s poll is buying, and why it is not 1s — each tick spawns
 bun.
 
-The patch knows nothing about bd. It reads `<status><priority> <text>` lines and
-paints them; anything writing that format feeds the rail, and when nothing does,
-every function in it returns empty and the sidebar is byte-identical to stock
-herdr.
+**Five rows, and the number they are five of.** The open rail asks for a row
+per line it is given, so an uncapped board would push the agent panel down to
+its floor; it draws five by default. But the counts on the summary line come
+from a **totals line** the writer puts first — `#<blocked> <in progress>
+<open>` — rather than from the rows, because counting five rows would report
+the size of its own truncation. `#` is a character no bead line can begin with,
+so both halves degrade cleanly on their own: a herdr without this patch drops
+that line as malformed and counts rows the way it always did, and this patch
+reading an older writer's file finds no totals and does the same.
 
-Overrides, in the herdr **server's** environment:
+The patch knows nothing about bd. It reads `<status><priority> <text>` lines
+and that one totals line, and paints them; anything writing that format feeds
+the rail, and when nothing does, every function in it returns empty and the
+sidebar is byte-identical to stock herdr.
+
+Overrides, in the herdr **server's** environment (or from nix — see
+`beadsSettings` below):
 
 ```
-HERDR_DRIP_BEADS_FILE       # default: $XDG_STATE_HOME/herdr-drip/sidebar-beads.txt
-HERDR_DRIP_BEADS_OPEN_FILE  # default: alongside it, sidebar-beads.open
-HERDR_DRIP_BEADS_INTERVAL   # default: 15 (seconds between passes)
-HERDR_DRIP_BEADS_LIMIT      # default: 40 beads written (a ceiling, not a target)
-HERDR_DRIP_BEADS_CWD        # pin the board to one directory, instead of following focus
-HERDR_DRIP_BD_BIN           # default: bd
+HERDR_DRIP_BEADS_FILE         # default: $XDG_STATE_HOME/herdr-drip/sidebar-beads.txt
+HERDR_DRIP_BEADS_OPEN_FILE    # default: alongside it, sidebar-beads.open
+HERDR_DRIP_BEADS_INTERVAL     # default: 15 (seconds between passes)
+HERDR_DRIP_BEADS_ROWS         # default: 5 rows on the rail
+HERDR_DRIP_BEADS_LIMIT        # default: 40 beads written (the outer ceiling; the smaller wins)
+HERDR_DRIP_BEADS_STATUSES     # comma-separated: which statuses reach the rail
+HERDR_DRIP_BEADS_SHOW_CLOSED  # 1 to include closed beads (costs a second bd call)
+HERDR_DRIP_BEADS_CWD          # pin the board to one directory, instead of following focus
+HERDR_DRIP_BEADS_CONFIG       # default: $HERDR_PLUGIN_CONFIG_DIR/config.json
+HERDR_DRIP_BD_BIN             # default: bd
 ```
+
+The last two are where the rail stops being alone. `config.json` in the
+directory herdr gives every plugin is **one file the rail and the board both
+read** — `statuses` (an order to the board, a filter to the rail),
+`show_closed`, and `rail_rows` — so the two surfaces cannot disagree about what
+a board is. Environment beats file, so the table above is still the quick way
+to change one. `beads/board/src/config.rs` is the format's description.
 
 `sidebar-beads.open` is read once, the first time the sidebar draws, and written
 on every click. So editing it from outside sets what the **next** server starts
@@ -702,7 +727,62 @@ pass `inputs.drift-rust.packages.${pkgs.system}.bd`. Two beads of different
 versions on one box is a real hazard, not tidiness: the first write by the
 newer one forward-migrates the shared on-disk Dolt schema and the older one
 then refuses to read it at all, with no downgrade. Which is also why the pin
-here moves in step with drift-rust's, never on its own.
+here moves in step with drift-rust's, never on its own. **One bd for both
+surfaces**, for that same reason: the rail only ever read, and the board
+writes.
+
+`services.herdr-drip.plugins.beadsSettings` sets the table above declaratively
+— an attrset of those variables, wrapped onto this plugin's commands and its
+board binary and nothing else, the same scoping `beadsPackage` gets. They are
+set as *defaults*, so a variable exported before launching herdr still wins:
+a host's config says what the box looks like, and that export is somebody
+changing a setting for an afternoon.
+
+### The board itself
+
+Ctrl+b **B** docks it on the left of the current tab; Ctrl+b **O** opens it as
+a whole tab. Both toggle — press again and the pane you opened is closed. The
+dock lands at about a quarter of the tab in List view; the tab opens in Kanban
+with the detail pane up.
+
+```
+ List   Table   Kanban    scope:repo
+▾ ○ Open (42)
+  P1 B dr-2rge       dev.sh all runs no ni…
+  P1 · dr-0127       The phone terminal wi…
+▾ ◐ In Progress (2)
+  P1 · dr-uo4x       mkfs.erofs fragment d…
+```
+
+`?` lists the keys. It reads *and writes*: `c` claims, `x` closes with a
+reason, `p` re-prioritises, `a` and `e` create and edit, `s` sets a status.
+`q` quits — and closes its pane, which is this fork's change and not a small
+one: herdr treats a pane's process exiting and a pane closing as two different
+events, so upstream's `q` left a dead pane holding its slot.
+
+Three entrypoints over one binary (`beads/herdr-plugin.toml`): `dock`, `tab`,
+and a floating `popup` that is declared but bound to no key, because a popup
+has no pane id in `pane list` and nothing could find it again to close it.
+Placement in the manifest is only a default — the launcher's `--placement`
+decides — so what an entrypoint really fixes is its `--mode`, the board's own
+idea of how much room it has. `--mode` understands `dock` and nothing else,
+which is why the *tab* entrypoint asks for `popup` and is not a typo.
+
+**Which repo's board** it opens is the question the rail answers every 15
+seconds, answered once at startup instead: the launcher passes the focused
+pane's directory as `HERDR_DRIP_BEADS_CWD`, and the binary re-derives it from
+`herdr pane list` anyway — walking up for `.beads` the way `bd` does, and
+resolving to *nothing* rather than to the best of a bad lot when no pane is on
+a board. That last part matters in a tab, where the board is itself the
+focused pane and has nobody else's focus to read.
+
+`nix/beads-board.nix` builds it (`nix build .#beads-board`, then
+`--selftest` for a headless dump), and `nix/drip-plugins.nix` splices the
+binary into the plugin directory at `board/target/release/herdr-beads` —
+cargo's own output path, so a store build and a working tree put it in the same
+place. There is no `[[build]]` in the manifest on purpose: `herdr plugin link`
+never runs one, and a store path has no toolchain to run it with. **On a linked
+working tree, `cargo build --release` in `beads/board/` by hand**, once.
 
 ## Hardcore plugins — patches on herdr itself
 
