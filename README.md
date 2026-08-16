@@ -375,6 +375,8 @@ these, but this is where a plugin's state actually is:
 | `~/.config/herdr/plugins/config/<plugin-id>/` | Per-plugin config dir (`$HERDR_PLUGIN_CONFIG_DIR`, `herdr plugin config-dir <id>`). |
 | `~/.local/state/herdr/plugins/<plugin-id>/` | Per-plugin state dir (`$HERDR_PLUGIN_STATE_DIR`). This is why a read-only store path works as a plugin root: nothing writes into the plugin directory itself. |
 | `~/.local/state/herdr-drip/sidebar-accounts.txt` | What gumbo-usage writes and the sidebar-accounts patch reads — the only thing connecting them. Override with `$HERDR_DRIP_ACCOUNTS_FILE`. |
+| `~/.local/state/herdr-drip/sidebar-beads.txt` | What the beads plugin writes and the sidebar-beads patch reads — the only thing connecting them. Override with `$HERDR_DRIP_BEADS_FILE`. |
+| `~/.local/state/herdr-drip/sidebar-beads.open` | Whether the beads rail is open, so a click survives a restart. Override with `$HERDR_DRIP_BEADS_OPEN_FILE`. |
 | `~/.local/state/herdr-drip/panes/<session>/<pane-id>` | yolo-shell's record of whether a pane is running the agent or a plain shell, so session restore puts back what was there. |
 | `~/.config/herdr/{herdr.sock,*.log,session*.json,.plugins.lock}` | herdr's own. Never touched. |
 
@@ -507,6 +509,106 @@ repo, and a host without it simply gets no rail (the plugin says so once in its
 log and exits). `herdr plugin action invoke sync --plugin drip.gumbo-usage`
 redraws now, after a `gumbo login` or a `gumbo use`.
 
+## beads: the board you are on, in the sidebar
+
+> **This is a re-implementation of
+> [herdr-beads](https://github.com/miiraheart/herdr-beads) (MIT).** That project
+> put a full [`bd`](https://github.com/steveyegge/beads) board — list, table and
+> kanban views, editing, dependency graphs — in a herdr pane, and the idea, the
+> status vocabulary and the glyphs below are all its. What is different here is
+> the surface: not a pane you open, but one line of sidebar that is always there,
+> and a click to unfold the rest. If you want the board, use theirs; this is the
+> ambient version of it.
+
+Above the accounts rail, a summary line you can click:
+
+```
+──────────────────────
+▾ beads       ●1 ◐2 ○5
+ ● dr-14 turnpike egress
+ ◐ dr-09 injector retry
+ ○ dr-02 kart lifecycle
+```
+
+Click the summary and it folds back to the one line. The counts are
+blocked/in-progress/open, in that order, and they are dropped from the **right**
+as the sidebar narrows — so the blocked count is the last thing to go, being the
+one worth interrupting yourself for.
+
+Below it, the board itself, **worst status first**: blocked, then in progress,
+then open, each group by bd priority. That is deliberately *not*
+herdr-beads' order, which opens with `open` and reads better in a pane the size
+of a board. Here the list is truncated to whatever rows the sidebar has left
+after the agent panel, and a list that drops its tail has to keep the blocked
+rows at the top or the truncation lies.
+
+The glyphs are herdr-beads' `status_glyph`, kept identical so the two read as
+the same tool:
+
+| Glyph | Status | | Glyph | Status |
+| --- | --- | --- | --- | --- |
+| `○` | open | | `❄` | deferred |
+| `◐` | in progress | | `◆` | pinned |
+| `●` | blocked | | `◇` | hooked |
+| `✓` | closed | | `•` | anything else |
+
+`✓` is in the reader's vocabulary but the plugin never sends it: closed beads
+are filtered out before the file is written, because the rail is what is left
+to do. It is there so anything else writing this format can use it.
+
+One substitution: herdr-beads draws pinned as 📌, which is an emoji and two
+terminal cells wide. In a 26-column sidebar every rail row is one glyph, one
+space and the text, so a two-cell glyph shifts that row's text against its
+neighbours. `◆` is the one-cell stand-in.
+
+Collapse the sidebar and the rail collapses with it, to a single glyph in the
+worst status on the board — there is the board, and this is its temperature.
+
+Three pieces, the same shape gumbo-usage has:
+
+- **[`bd`](https://github.com/steveyegge/beads)** owns the board. Nothing here
+  writes to it.
+- **`drip.beads`** (this plugin) asks herdr which pane is focused, runs
+  `bd list --json` in that pane's directory, and writes one line per bead to a
+  file. Every call is an argv vector rather than a shell string, which is
+  herdr-beads' discipline and worth keeping: bead titles are arbitrary text.
+- **the `sidebar-beads` hardcore patch** reads that one file and draws it.
+
+The rail **follows focus**, which the pane version had no need to: move to
+another repo and the rail is that repo's board. Focus decides only among panes
+that are *on* a board, though — move to one that has no `.beads` anywhere above
+it and the rail keeps showing whichever other pane's board it can find, rather
+than going blank because the pane you happen to be typing in is not a repo.
+That is what the 15s poll is buying, and why it is not 1s — each tick spawns
+bun.
+
+The patch knows nothing about bd. It reads `<status><priority> <text>` lines and
+paints them; anything writing that format feeds the rail, and when nothing does,
+every function in it returns empty and the sidebar is byte-identical to stock
+herdr.
+
+Overrides, in the herdr **server's** environment:
+
+```
+HERDR_DRIP_BEADS_FILE       # default: $XDG_STATE_HOME/herdr-drip/sidebar-beads.txt
+HERDR_DRIP_BEADS_OPEN_FILE  # default: alongside it, sidebar-beads.open
+HERDR_DRIP_BEADS_INTERVAL   # default: 15 (seconds between passes)
+HERDR_DRIP_BEADS_LIMIT      # default: 40 beads written (a ceiling, not a target)
+HERDR_DRIP_BEADS_CWD        # pin the board to one directory, instead of following focus
+HERDR_DRIP_BD_BIN           # default: bd
+```
+
+`sidebar-beads.open` is read once, the first time the sidebar draws, and written
+on every click. So editing it from outside sets what the **next** server starts
+with, not what this one is showing — clicking is the only way to fold a running
+rail. That is also why there is no keybinding for it, where `drip.agent-scope`
+has one: its state file is re-read by a plugin action on every invocation, and
+this one is not.
+
+`bd` need not be installed: a host without it gets no rail and nothing to turn
+off, the same way a host without gumbo gets no accounts rail.
+`herdr plugin action invoke sync --plugin drip.beads` refreshes now.
+
 ## Hardcore plugins — patches on herdr itself
 
 Some of our opinions have no plugin surface to land on: sidebar chrome,
@@ -525,6 +627,15 @@ same way the plugin directories curate everything else. Current set:
   the renderer — those functions are what the click hit-testing and the scroll
   metrics ask where the agent panel is, so carving anywhere else would look
   right and mis-route every click on the rail.
+- **sidebar-beads** — the beads rail above, between the agent list and the
+  accounts rail, with a summary line that opens and closes it. Same reason as
+  `sidebar-accounts`: there is no plugin surface that reaches the sidebar. It
+  lands ABOVE the accounts rail by *sequence* rather than arithmetic — each
+  carve takes rows off the bottom of what it is handed, so running the beads
+  carve after the accounts carve puts it between the agents and the accounts.
+  The open/closed flag is a file rather than herdr session state because the
+  carve happens in `expanded_sidebar_sections`, which is handed no `AppState`
+  to read it from.
 - **last-close-quits** — closing the last pane stops the server, so closing
   your way out of herdr is how you reload it. See below.
 - **shell-panes** — a new workspace or tab opens a terminal, not an agent.

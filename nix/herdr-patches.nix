@@ -895,5 +895,86 @@ herdrPkg.overrideAttrs (old: {
     # self-consistent at any offset.
     substituteInPlace src/app/input/mouse.rs \
       --replace-fail '        let (save, _, _) = crate::ui::rename_button_rects(inner);' '        let (save, _, _) = crate::ui::rename_button_rects(crate::app::state::drip_rename_button_area(inner));'
+    # sidebar-beads: a rail ABOVE the accounts one showing what the `bd` board
+    # in this tree is carrying — a summary line you can click, and the beads
+    # under it when you do.
+    #
+    # This is a RE-IMPLEMENTATION of herdr-beads
+    # (https://github.com/miiraheart/herdr-beads, MIT), and the credit for the
+    # idea and for the vocabulary belongs there: the status set, the glyphs and
+    # the priority ranking are its `src/model.rs`, kept identical on purpose.
+    # What is different is the shape. herdr-beads is a ratatui PANE app that
+    # herdr opens in a dock or a popup — three views, a detail overlay, and
+    # writes back to `bd`. This is sidebar chrome: read-only, always in view,
+    # and one row tall until you ask for more. The two coexist; nothing here
+    # duplicates the pane app and nothing here writes to `bd`.
+    #
+    # Which is also why it is a HARDCORE plugin while the original is a plain
+    # one. The original needed only a pane, and herdr grants panes to any
+    # plugin. A rail cannot be asked for: pane placements are
+    # overlay/popup/split/tab/zoomed with no sidebar among them, and the
+    # sidebar's own plugin surface is per-row tokens on rows herdr has already
+    # decided exist. Nothing in the plugin API can add a row under the agent
+    # list, and nothing in it can be clicked.
+    #
+    # Same two-halves contract the accounts rail has: the patched code reads
+    # ONE file and knows nothing about `bd`, the drip.beads plugin fills it,
+    # and with nothing feeding it every function returns empty and the sidebar
+    # is byte-identical to stock. See sidebar-beads.rs for the file format, the
+    # glyphs and the geometry.
+    cat ${./sidebar-beads.rs} >> src/ui/sidebar.rs
+    cat ${./sidebar-beads-input.rs} >> src/app/input/sidebar.rs
+
+    # ABOVE the accounts rail is a carve CHAINED onto the accounts carve, not a
+    # second opinion about where the agent panel ends. Both take rows off the
+    # bottom of what they are handed, so running ours second lands it between
+    # the agents and the accounts — which is the requested order, and it falls
+    # out of the sequence rather than out of any arithmetic about the other
+    # rail's height.
+    #
+    # The accounts rail's own carve is what these two anchors are, verbatim
+    # from the sidebar-accounts section above with its discarded second return
+    # value given a name: `drip_beads_footer` asks it whether the accounts
+    # actually took any rows, because when they did not, the beads rail is the
+    # bottom-most thing in the sidebar and inherits the job of keeping the `«`
+    # toggle's row clear.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    let detail_area = Rect::new(content.x, content.y + ws_h, content.width, detail_h); let (detail_area, _) = drip_accounts_split(detail_area, &drip_accounts_lines());' '    let detail_area = Rect::new(content.x, content.y + ws_h, content.width, detail_h); let (detail_area, drip_accounts) = drip_accounts_split(detail_area, &drip_accounts_lines()); let (detail_area, _) = drip_beads_split(detail_area, &drip_beads_lines(), drip_beads_footer(drip_accounts));'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    let detail_area = Rect::new(content.x, divider_y + 1, content.width, detail_h as u16); let (detail_area, _) = drip_accounts_split_collapsed(detail_area, &drip_account_dots(&drip_accounts_lines()));' '    let detail_area = Rect::new(content.x, divider_y + 1, content.width, detail_h as u16); let (detail_area, drip_accounts) = drip_accounts_split_collapsed(detail_area, &drip_account_dots(&drip_accounts_lines())); let (detail_area, _) = drip_beads_split_collapsed(detail_area, &drip_beads_lines(), drip_beads_footer(drip_accounts));'
+
+    # The draws. Both rails now share one band under the agent list, so the
+    # accounts rail can no longer be handed `drip_accounts_rect`'s whole answer
+    # — that rect is both rails, and where the boundary between them falls
+    # depends on how many accounts there are.
+    #
+    # ONE call per frame, destructured, rather than a rect function per rail:
+    # the split is recovered by re-reading `drip_accounts_lines()`, which
+    # re-stats the accounts file whenever its 500 ms throttle has expired, so
+    # two calls in one frame can land either side of a refresh and disagree by
+    # however many rows the accounts rail just grew. The rails would overlap for
+    # that one frame. A function returning the pair does not fix that on its
+    # own — being asked once is what fixes it.
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    drip_render_accounts(app, frame, drip_accounts_rect(area, detail_area, DRIP_FOOTER_ROWS), &drip_accounts_lines()); render_sidebar_toggle(app, frame, area, false, p);' '    let (drip_beads_area, drip_accounts_area) = drip_beads_rects(area, app.sidebar_section_split); drip_render_beads(app, frame, drip_beads_area, &drip_beads_lines()); drip_render_accounts(app, frame, drip_accounts_area, &drip_accounts_lines()); render_sidebar_toggle(app, frame, area, false, p);'
+
+    substituteInPlace src/ui/sidebar.rs \
+      --replace-fail '    drip_render_accounts_collapsed(app, frame, drip_accounts_rect(area, detail_area, 1), &drip_account_dots(&drip_accounts_lines())); let detail_content_area = Rect::new(' '    let (drip_beads_area, drip_accounts_area) = drip_beads_rects_collapsed(area); drip_render_beads_collapsed(app, frame, drip_beads_area, &drip_beads_lines()); drip_render_accounts_collapsed(app, frame, drip_accounts_area, &drip_account_dots(&drip_accounts_lines())); let detail_content_area = Rect::new('
+
+    # app::input reads the geometry through `crate::ui`, so the rail's rect,
+    # its hit test and its toggle join the sidebar re-export list — the same
+    # line the tab tree's two names were appended to just above.
+    substituteInPlace src/ui.rs \
+      --replace-fail '        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections, drip_tab_tree_caret_at, drip_tab_tree_target_at,' '        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections, drip_beads_rect, drip_beads_summary_hit, drip_beads_toggle_open, drip_tab_tree_caret_at, drip_tab_tree_target_at,'
+
+    # The click. Asked in the agent-panel stretch of the LEFT-button branch
+    # rather than the workspace-list one, because that is where the rail's rows
+    # are — below `workspace_at_row`, which cannot answer for them, and above
+    # the sort toggle, which is the first thing that looks in this region.
+    # Nothing else claims these rows: the carve took them out of the agent
+    # list, so `agent_detail_target_at` has already stopped answering here.
+    substituteInPlace src/app/input/mouse.rs \
+      --replace-fail '                    if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {' '                    if self.drip_toggle_beads_at(mouse.column, mouse.row) { return None; } if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {'
   '';
 })
