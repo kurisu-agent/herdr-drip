@@ -436,6 +436,29 @@ in
           ignored, so a fuller palette passes through unharmed.
         '';
       };
+
+      transparentChrome = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Leave herdr's two chrome planes — `panel_bg` (tab bar, floating
+          panels, overlays, modals) and `sidebar_bg` — transparent, so they
+          inherit the terminal's own background instead of being painted.
+
+          This is the one thing `palette` cannot say: every value in a
+          palette is a hue, and transparency is the absence of one. herdr
+          spells it `reset`, and its own default for `sidebar_bg` is that.
+
+          On, which is the default and the drip's appearance: herdr sits
+          inside zellij inside a terminal that already has a background, and
+          an opaque plane a shade off from it is a visible seam for nothing.
+          Off paints both planes with the palette's `bg_alt` (mantle) — the
+          shade the zellij theme uses for its own chrome — for a host that
+          wants herdr opaque.
+
+          Only consulted while `theme.enable` is true.
+        '';
+      };
     };
 
     curatedDefaults = lib.mkOption {
@@ -513,7 +536,11 @@ in
     services.herdr-drip.plugins.settings = lib.mkMerge [
       (lib.mkIf cfg.curatedDefaults (lib.mapAttrsRecursive (_: lib.mkDefault) curatedSettings))
       (lib.mkIf cfg.theme.enable (
-        lib.mapAttrsRecursive (_: lib.mkOverride 900) (dripTheme.mkTheme cfg.theme.palette)
+        lib.mapAttrsRecursive (_: lib.mkOverride 900) (
+          dripTheme.mkTheme {
+            inherit (cfg.theme) palette transparentChrome;
+          }
+        )
       ))
     ];
 

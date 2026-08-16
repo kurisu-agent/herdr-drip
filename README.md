@@ -64,12 +64,24 @@ The config is path-free: keybindings reach the plugins through
 ### The colour scheme
 
 `[theme.custom]` in the curated config is our palette — Catppuccin Mocha with
-`accent` pointed at green — mapped onto herdr's seventeen theme tokens. It is
-the same palette the zellij theme renders from, mapped the same way, because
-the two stack on one screen: herdr's chrome sits on `mantle` like zellij's
-topbar, and its active borders are green like zellij's `ribbon_selected`. The
-one departure from stock herdr is that accent: herdr's own Catppuccin uses
-blue.
+`accent` pointed at lavender — mapped onto herdr's seventeen theme tokens. It
+is the same palette the zellij theme renders from, because the two stack on one
+screen, but two of the mappings are herdr's own and worth knowing:
+
+- **the chrome is transparent, not painted.** `panel_bg` and `sidebar_bg` are
+  `reset` — the terminal's own background — rather than `mantle`. herdr is not
+  the outermost thing on screen here, so an opaque plane a shade off from the
+  shell around it is a visible seam for nothing. `theme.transparentChrome =
+  false` paints them instead.
+- **the accent is lavender, not the palette's green.** herdr spends `green` on
+  the done/idle mark of an agent row, and an accent of the same hue paints
+  "focused" and "finished" identically. It costs the agreement with zellij's
+  green `ribbon_selected`, which is the smaller loss.
+
+`surface0` follows from the first of those: with both chrome planes
+transparent it is the only opaque plane the sidebar and tab bar have left, so
+it takes `bg_alt` (mantle) and reads as slightly darker than the terminal
+behind it, rather than the mid-grey `surface0` (#313244) would put there.
 
 **Change colours in the palette, not in the TOML.** `nix/theme.nix` holds the
 mapping and generates the block; `config/herdr.toml` carries the render of it
@@ -81,8 +93,17 @@ matters — and that they agree at all is one command to check:
 ```
 nix-instantiate --eval -E '
   let t = import ./nix/theme.nix; c = builtins.fromTOML (builtins.readFile ./config/herdr.toml);
-  in (t.mkTheme t.defaultPalette).theme.custom == c.theme.custom'
+  in (t.mkTheme { palette = t.defaultPalette; }).theme.custom == c.theme.custom'
 ```
+
+Keeping that `true` is the whole job: while it was false — four values in the
+TOML hand-set past what the generator could emit — a workstation reading the
+file and a kart reading the generated config could not be made to look alike by
+any amount of bumping (`dr-50bg — A kart's herdr uses the palette defaults
+where the workstation uses four hand-set values, so their colour schemes cannot
+match`). So it is also `nix flake check` now — `checks.<system>.theme-render`
+compares the same two blocks plus `ui.accent`, and prints the keys that differ
+instead of just failing.
 
 `theme.auto_switch` stays off on purpose: custom tokens are applied on top of
 whichever base theme is selected, so following the terminal into light mode
@@ -293,6 +314,13 @@ aliases first (`accent`, `bg_alt`, `bg_surface`, `primary`, `secondary`),
 falling back to the Catppuccin names for a palette with no role layer — so
 re-tinting means editing one palette, not this repo. `theme.enable = false`
 generates no theme at all.
+
+One thing a palette cannot carry, because every value in one is a hue:
+**transparency**. `theme.transparentChrome` (default `true`) is that knob —
+on, `panel_bg` and `sidebar_bg` are herdr's `reset` and inherit the terminal's
+background; off, they take `bg_alt`. It is an option rather than a rung
+because "no colour" is not a darker member of a colour set, and without it the
+generator could not emit the drip's own appearance at all.
 
 That default is *vendored*, and it has to be: nix-env depends on
 nix-claude-drip, which depends on this repo, so a `nix-env` flake input here
