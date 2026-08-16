@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Startup hook: keep the sidebar's beads rail fed.
+#
+# bd has no watch mode of its own -- unlike gumbo, which owns its cache and its
+# TTL and lets that plugin's watcher be a respawn loop around one long-running
+# process -- so the interval lives here and each tick is a whole bin/sync.
+#
+# Fifteen seconds because the rail follows FOCUS as well as content: it shows
+# the board of whichever pane you are on, so moving between two repos has to
+# change the rail without you asking it to. A `bd list` on a local board is
+# milliseconds and the `herdr pane list` beside it is one socket call, so the
+# cost of the tick is dominated by spawning bun -- which is why this is not one
+# second.
+set -uo pipefail
+
+interval=${HERDR_DRIP_BEADS_INTERVAL:-15}
+# `:-` only guards unset and empty. A non-numeric or zero interval makes `sleep`
+# fail instantly, and the loop below has nothing else in it to slow down -- so
+# a typo in the server's environment becomes a bun fork storm against the herdr
+# socket rather than a rail that refreshes oddly. Fall back rather than exit:
+# the rail is worth more than the setting.
+if [[ ! $interval =~ ^[1-9][0-9]*$ ]]; then
+  echo "HERDR_DRIP_BEADS_INTERVAL=$interval is not a positive whole number; using 15" >&2
+  interval=15
+fi
+root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "bun is not on the herdr server's PATH; the beads rail stays empty" >&2
+  exit 0
+fi
+
+# No check for `bd` here on purpose. bin/sync degrades on its own when the
+# board cannot be read, and bd is a per-repo tool that can arrive on PATH long
+# after the server started -- a watcher that gave up at startup would need a
+# server restart to notice, which is exactly the kind of thing you forget you
+# did.
+while :; do
+  "$root/bin/sync"
+  sleep "$interval"
+done

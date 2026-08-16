@@ -67,6 +67,7 @@ rec {
   # any other — it is what to link when testing this machinery.
   all = lib.genAttrs [
     "agent-scope"
+    "beads"
     "flip-split"
     "gumbo-usage"
     "hello"

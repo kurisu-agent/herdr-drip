@@ -295,6 +295,7 @@ in
       type = lib.types.listOf lib.types.str;
       default = [
         "agent-scope"
+        "beads"
         "flip-split"
         "gumbo-usage"
         "pane-titles"

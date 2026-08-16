@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# One pass: rewrite the sidebar's beads rail and exit.
+#
+# Serves the same file the watcher does, so this is what to invoke after a
+# `bd create` or a `bd update` rather than waiting out the poll interval.
+#
+# The split of labour is the same one gumbo-usage has: this script decides
+# WHERE the file goes and that the write is atomic, bin/board.js decides what
+# goes in it. The rail itself is a hardcore plugin (nix/herdr-patches.nix)
+# that reads that one file and nothing else -- no file, no rail, so a box
+# without bd needs nothing turned off.
+#
+# The rail re-implements herdr-beads (https://github.com/miiraheart/herdr-beads,
+# MIT); see ../nix/sidebar-beads.rs for the credit note.
+set -uo pipefail
+
+out=${HERDR_DRIP_BEADS_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip/sidebar-beads.txt}
+root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+
+# bun is the drip's declared runtime dep (flake.nix#herdr-drip-deps); jq and
+# python3 are deliberately not on the herdr server's PATH, so it is the only
+# thing here that can read `bd --json`. A host without it gets one line and an
+# untouched rail, the same way agent-scope and gumbo-usage degrade.
+if ! command -v bun >/dev/null 2>&1; then
+  echo "bun is not on the herdr server's PATH; the beads rail stays as it is" >&2
+  exit 0
+fi
+
+mkdir -p -- "$(dirname -- "$out")" || exit 0
+
+# Written whole or not at all: the reader polls twice a second and would
+# otherwise catch a half-written board and draw a rail with the bottom missing.
+# The temp file is a sibling so the rename stays on one filesystem.
+tmp=$(mktemp -- "$out.XXXXXX") || exit 0
+trap 'rm -f -- "$tmp"' EXIT
+
+if ! bun "$root/bin/board.js" >"$tmp"; then
+  # board.js failing is a bd that is absent, erroring, or mid-migration. The
+  # LAST good board stays on screen rather than the rail blinking out, which
+  # is the behaviour that makes a transient error invisible instead of alarming.
+  echo "beads: could not read the board; leaving the rail as it is" >&2
+  exit 0
+fi
+
+mv -f -- "$tmp" "$out" && trap - EXIT
