@@ -14,7 +14,7 @@
 // there is no board to read, which is what makes the rail disappear rather
 // than show an error on a box that has never installed bd.
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 // bd's status names, abbreviated to the one character the rail's file format
@@ -39,6 +39,62 @@ const STATUS_CHAR = {
 const RAIL_ORDER = ["blocked", "in_progress", "open", "hooked", "pinned", "deferred", "closed"];
 
 const TIMEOUT_MS = 10_000;
+
+// The plugin's config file -- the SAME file the board reads, which is the
+// whole point of it: `../board/src/config.rs` documents the format and both
+// surfaces answer to it, so there is no way for the rail and the board to
+// disagree about what statuses a board has. herdr creates the directory and
+// exports it to every plugin command; with the variable unset there is no
+// config, and every default below stands.
+//
+// Read leniently, like everything else here: a config that will not parse is
+// a rail that draws normally, not a rail that vanishes with a stack trace in
+// the server log every fifteen seconds.
+function readConfig() {
+  const explicit = process.env.HERDR_DRIP_BEADS_CONFIG;
+  const dir = process.env.HERDR_PLUGIN_CONFIG_DIR;
+  const path = explicit || (dir ? `${dir}/config.json` : null);
+  if (!path) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const CONFIG = readConfig();
+
+// Which statuses may appear, or `null` for "everything the board has". Env
+// (comma-separated) beats file, which is the layering every other knob here
+// has and what lets a nix module set this without writing a file.
+//
+// Unset means unset, NOT "everything in RAIL_ORDER": a board with a custom
+// status has always had it on the rail, ranked last, and an allowlist that
+// silently dropped it would be a filter nobody asked for. Where the board
+// reads this list as an ORDER, the rail reads it as a filter -- a rail is a
+// handful of rows, so a vocabulary is the only thing it can be.
+function configuredStatuses() {
+  const fromEnv = process.env.HERDR_DRIP_BEADS_STATUSES;
+  const raw = fromEnv !== undefined && fromEnv !== ""
+    ? fromEnv.split(",")
+    : Array.isArray(CONFIG.statuses)
+      ? CONFIG.statuses
+      : null;
+  if (!raw) return null;
+  const clean = raw.map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean);
+  return clean.length > 0 ? clean : null;
+}
+
+// Closed beads are what is DONE, and the rail is what is left, so they are off
+// unless asked for -- the same default `show_closed` gives the board.
+function showClosed() {
+  const fromEnv = process.env.HERDR_DRIP_BEADS_SHOW_CLOSED;
+  if (fromEnv !== undefined && fromEnv !== "") {
+    return ["1", "true", "yes"].includes(fromEnv.toLowerCase());
+  }
+  return CONFIG.show_closed === true;
+}
 
 // `hasOwn` rather than a bare lookup: `STATUS_CHAR` is an object literal, so a
 // bead whose status is `toString` or `constructor` would otherwise resolve to
@@ -168,8 +224,8 @@ function bdPath() {
   return [...extra, process.env.PATH ?? ""].filter(Boolean).join(":");
 }
 
-function loadBeads(cwd) {
-  const out = run(process.env.HERDR_DRIP_BD_BIN || "bd", ["list", "--json"], {
+function bdList(cwd, args) {
+  const out = run(process.env.HERDR_DRIP_BD_BIN || "bd", ["list", ...args, "--json"], {
     cwd,
     env: { ...process.env, PATH: bdPath() },
   });
@@ -191,6 +247,19 @@ function loadBeads(cwd) {
   } catch {
     return null;
   }
+}
+
+function loadBeads(cwd, wantClosed) {
+  const beads = bdList(cwd, []);
+  if (beads === null || !wantClosed) return beads;
+  // `bd list` omits closed issues, so showing them takes a second ask -- the
+  // board's `bd::load` merges exactly this query for exactly this reason.
+  // Best-effort: a board that cannot answer the second question is still a
+  // board, and the open beads are the ones the rail exists for.
+  const closed = bdList(cwd, ["--status", "closed"]);
+  if (!Array.isArray(closed)) return beads;
+  const have = new Set(beads.map((bead) => bead?.id));
+  return [...beads, ...closed.filter((bead) => !have.has(bead?.id))];
 }
 
 // One line per bead: `<status><priority> <text>`, the format nix/sidebar-beads.rs
@@ -217,7 +286,10 @@ function main() {
   // how the rail gets out of the way when you move to a repo without one.
   if (!cwd) return;
 
-  const beads = loadBeads(cwd);
+  const allowed = configuredStatuses();
+  const closedToo = showClosed();
+
+  const beads = loadBeads(cwd, closedToo);
   // The two empty answers are NOT the same, and the exit code is the only
   // place the difference survives. `[]` is "this board has nothing on it", so
   // an empty rail is the truth and bin/sync should write it. `null` is "bd
@@ -233,8 +305,18 @@ function main() {
   const limit = Number.parseInt(process.env.HERDR_DRIP_BEADS_LIMIT ?? "", 10);
   const cap = Number.isInteger(limit) && limit > 0 ? limit : 40;
 
+  // `closed` is gated by its own setting even when listed, so that one key
+  // means the same thing on both surfaces: the board special-cases closed in
+  // exactly this way (`board_statuses`), and a vocabulary that happens to
+  // mention it must not quietly turn it on.
+  const keep = (bead) => {
+    const status = bead?.status;
+    if (!closedToo && status === "closed") return false;
+    return allowed === null || allowed.includes(status);
+  };
+
   const lines = beads
-    .filter((bead) => bead?.status !== "closed")
+    .filter(keep)
     .sort((a, b) => {
       const byStatus = statusRank(a?.status) - statusRank(b?.status);
       if (byStatus !== 0) return byStatus;
