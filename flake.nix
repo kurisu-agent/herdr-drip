@@ -99,6 +99,82 @@
                 fi
                 touch $out
               '';
+
+          # The accent rule, checked against the palette shape a FLEET HOST
+          # actually gets — which is not the one above.
+          #
+          # `theme-render` only ever exercised `defaultPalette`, and no fleet
+          # host reads that: nix-env's `nixosModules.claude` sets
+          # `services.herdr-drip.plugins.theme.palette = lib.mkDefault <its
+          # palette>`, and an option definition at mkDefault outranks an option
+          # default, so every host and every kart is themed from nix-env's
+          # palette — role layer and all. That is how `dr-gfxc — A kart's herdr
+          # accent is still the palette's green, not the workstation's lavender
+          # — the last of dr-50bg's four keys` survived a green check: the fix
+          # had been made to the attrset nothing reads.
+          #
+          # So this feeds `mkTheme` the shape that palette has. It cannot BE
+          # that palette — herdr-drip may not take nix-env as an input, which is
+          # the whole reason the default is vendored — so it reconstructs the
+          # role layer over our own rungs, which is exactly the coupling worth
+          # pinning: if nix-env's roles move, this is the check that should be
+          # read next to them.
+          theme-accent-rule =
+            let
+              # nix-env's role layer, as far as `mkTheme` reads it.
+              roled = theme.defaultPalette // {
+                bg = theme.defaultPalette.base;
+                bg_alt = theme.defaultPalette.mantle;
+                bg_surface = theme.defaultPalette.surface0;
+                primary = theme.defaultPalette.text;
+                secondary = theme.defaultPalette.subtext0;
+                accent = theme.defaultPalette.green;
+                branch = theme.defaultPalette.lavender;
+              };
+              accentOf = palette: (theme.mkTheme { inherit palette; }).theme.custom.accent;
+
+              # 1. The bug itself: an accent role pointing at a hue herdr spends
+              #    on a state must not reach herdr's accent.
+              collisionRedirected = accentOf roled == theme.defaultPalette.lavender;
+              # 2. …and it is a REDIRECT, not a hard-coding. A role outside
+              #    herdr's state vocabulary is followed exactly as given, so a
+              #    host retints herdr by retinting its palette, as documented.
+              nonCollidingHonoured = accentOf (roled // { accent = "#FF0099"; }) == "#FF0099";
+              # 3. A palette with no lavender to redirect to keeps the colliding
+              #    role rather than inventing a colour it was never handed.
+              noLavenderDegrades =
+                accentOf (builtins.removeAttrs roled [ "lavender" ]) == theme.defaultPalette.green;
+              # 4. The legacy spelling cannot drift from the token, since herdr
+              #    reads it whenever the token is unset.
+              legacyAgrees =
+                (theme.mkTheme { palette = roled; }).ui.accent == accentOf roled;
+            in
+            pkgs.runCommand "herdr-drip-theme-accent-rule"
+              {
+                results = builtins.toJSON {
+                  inherit
+                    collisionRedirected
+                    nonCollidingHonoured
+                    noLavenderDegrades
+                    legacyAgrees
+                    ;
+                };
+                nativeBuildInputs = [ pkgs.jq ];
+              }
+              ''
+                printf '%s' "$results" | jq -S . > results.json
+                if failed=$(jq -r 'to_entries[] | select(.value == false) | .key' results.json) \
+                   && [ -n "$failed" ]; then
+                  echo "nix/theme.nix's accent rule is broken for a role-layered palette:" >&2
+                  printf '  failed: %s\n' $failed >&2
+                  echo >&2
+                  echo "This is the shape every fleet host and every kart is themed from" >&2
+                  echo "(nix-env nixosModules.claude sets theme.palette at mkDefault), NOT" >&2
+                  echo "the vendored defaultPalette that theme-render exercises." >&2
+                  exit 1
+                fi
+                touch $out
+              '';
         }
       );
 

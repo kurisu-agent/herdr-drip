@@ -63,20 +63,26 @@ The config is path-free: keybindings reach the plugins through
 
 ### The colour scheme
 
-`[theme.custom]` in the curated config is our palette — Catppuccin Mocha with
-`accent` pointed at lavender — mapped onto herdr's seventeen theme tokens. It
-is the same palette the zellij theme renders from, because the two stack on one
-screen, but two of the mappings are herdr's own and worth knowing:
+`[theme.custom]` in the curated config is our palette — Catppuccin Mocha —
+mapped onto herdr's seventeen theme tokens. It is the same palette the zellij
+theme renders from, because the two stack on one screen, but two of the
+mappings are herdr's own and worth knowing:
 
 - **the chrome is transparent, not painted.** `panel_bg` and `sidebar_bg` are
   `reset` — the terminal's own background — rather than `mantle`. herdr is not
   the outermost thing on screen here, so an opaque plane a shade off from the
   shell around it is a visible seam for nothing. `theme.transparentChrome =
   false` paints them instead.
-- **the accent is lavender, not the palette's green.** herdr spends `green` on
-  the done/idle mark of an agent row, and an accent of the same hue paints
-  "focused" and "finished" identically. It costs the agreement with zellij's
-  green `ribbon_selected`, which is the smaller loss.
+- **the accent avoids herdr's state colours.** herdr spells seven colours by
+  name and every one already means something — green is a finished agent,
+  yellow a working one, red one that needs you — so an accent equal to any of
+  them paints "focused" and "finished" alike. The rule is therefore *take the
+  palette's `accent` role, unless that role is a hue herdr has already spent on
+  a state*; ours points at green, so herdr's accent redirects to `lavender`,
+  the one accent rung herdr has no token for. Point the role at something
+  outside that vocabulary and herdr follows it unchanged. It costs the
+  agreement with zellij's green `ribbon_selected`, which is the smaller loss —
+  zellij has no agent states for its accent to collide with.
 
 `surface0` follows from the first of those: with both chrome planes
 transparent it is the only opaque plane the sidebar and tab bar have left, so
@@ -104,6 +110,21 @@ where the workstation uses four hand-set values, so their colour schemes cannot
 match`). So it is also `nix flake check` now — `checks.<system>.theme-render`
 compares the same two blocks plus `ui.accent`, and prints the keys that differ
 instead of just failing.
+
+**But note which palette that command renders.** It renders the *vendored
+default*, and no fleet host reads it: nix-env's `nixosModules.claude` sets
+`services.herdr-drip.plugins.theme.palette = lib.mkDefault <nix-env's
+palette>`, and an option definition at `mkDefault` outranks an option
+*default*, so every fleet host and every kart is themed from nix-env's palette
+— role layer included. A fix made to `defaultPalette` alone therefore ships
+nothing and still checks green, which is exactly how `dr-gfxc — A kart's herdr
+accent is still the palette's green, not the workstation's lavender — the last
+of dr-50bg's four keys` happened. `checks.<system>.theme-accent-rule` covers
+that shape: it rebuilds nix-env's role layer over our rungs and asserts the
+accent rule holds — the collision redirects, a non-colliding role is followed
+verbatim, a palette with no lavender degrades rather than inventing a colour,
+and `ui.accent` tracks the token. If nix-env's roles move, that check is the
+thing to read next to them.
 
 `theme.auto_switch` stays off on purpose: custom tokens are applied on top of
 whichever base theme is selected, so following the terminal into light mode
@@ -314,6 +335,12 @@ aliases first (`accent`, `bg_alt`, `bg_surface`, `primary`, `secondary`),
 falling back to the Catppuccin names for a palette with no role layer — so
 re-tinting means editing one palette, not this repo. `theme.enable = false`
 generates no theme at all.
+
+In practice a fleet host never exercises that default: nix-env's `claude`
+module already sets this option at `mkDefault`, which outranks the option's
+own default. So on any host in the drip chain, "the palette" means nix-env's,
+and changing `defaultPalette` in this repo changes what a bare `nix eval`
+prints and nothing else.
 
 One thing a palette cannot carry, because every value in one is a hue:
 **transparency**. `theme.transparentChrome` (default `true`) is that knob —
