@@ -3,6 +3,12 @@
 //!
 //! herdr launches plugins with a minimal PATH, so `bd` is resolved against the
 //! common Homebrew/usr locations before falling back to PATH.
+//!
+//! DRIP CHANGE: HERDR_DRIP_BD_BIN comes first. On NixOS none of those
+//! locations exist and `bd` is deliberately not on the herdr server's PATH --
+//! it is scoped to this plugin alone (`nix/plugins.nix`, `beadsPackage`), the
+//! same way the rail gets it. The hardcoded list stays for the hosts it was
+//! written for.
 
 pub mod types;
 
@@ -13,6 +19,16 @@ use std::process::Command;
 use types::Bead;
 
 fn resolve_bd() -> String {
+    // An explicit bd beats every guess: it is how a nix host says which bd,
+    // and saying which one matters -- the first write by a newer bd migrates
+    // a live board's schema and an older one then refuses to read it, so the
+    // board and the rail must run the same binary. `beads/bin/board.js` reads
+    // the same variable.
+    if let Ok(bin) = std::env::var("HERDR_DRIP_BD_BIN") {
+        if !bin.is_empty() {
+            return bin;
+        }
+    }
     for c in [
         "/opt/homebrew/bin/bd",
         "/usr/local/bin/bd",
