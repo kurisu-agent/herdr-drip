@@ -2,14 +2,21 @@ id = "drip.beads"
 name = "Beads"
 version = "0.1.0"
 min_herdr_version = "0.8.0"
-description = "Feed the sidebar's beads rail: the focused repo's bd board, worst status first"
+description = "The focused repo's bd board: a rail in the sidebar, a board in a pane"
 platforms = ["linux", "macos"]
 
-# A re-implementation of herdr-beads (https://github.com/miiraheart/herdr-beads,
-# MIT), which put a `bd` board in a herdr pane. This is the sidebar's share of
-# that idea: not the board, but the one line of it you want on screen while you
-# work, and a click to open the rest. The status vocabulary and glyphs are that
-# project's -- see nix/sidebar-beads.rs for the full credit note.
+# Both halves of this plugin come from herdr-beads
+# (https://github.com/miiraheart/herdr-beads, MIT), by different routes.
+#
+# The RAIL (bin/watch + nix/sidebar-beads.rs) is a re-implementation for a
+# surface that project has no equivalent of: not the board, but the one line of
+# it you want on screen while you work, and a click to open the rest. Its
+# status vocabulary and glyphs are herdr-beads'.
+#
+# The BOARD (board/) is herdr-beads itself, forked into this repo -- see
+# board/UPSTREAM.md for the rev and board/LICENSE for the terms it travels
+# under. Forked rather than depended on because the fixes it needs here are
+# changes to its behaviour, and a vendored input is a thing you cannot edit.
 
 [[startup]]
 command = ["bin/watch"]

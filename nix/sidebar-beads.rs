@@ -14,8 +14,14 @@
 // What is NOT re-implemented is its shape. herdr-beads is a ratatui PANE app
 // -- three views, a detail popup, keybindings, and writes back to `bd`. This
 // is a rail in the sidebar chrome: read-only, one summary line you can click,
-// and the bead list under it when you do. The pane app can be run beside this
-// one; nothing here duplicates it, and nothing here writes to `bd`.
+// and the bead list under it when you do. Nothing here writes to `bd`.
+//
+// That pane app is now in this repo too, as a FORK rather than a second
+// program to run beside this one: beads/board is herdr-beads' source, and
+// beads/board/UPSTREAM.md records the rev it was taken at. The two surfaces
+// are one plugin -- the rail is the glance, the board is what a click on it
+// opens -- so this note is not history: it is the same project's code in both
+// halves, and this half is the one that was written from scratch.
 //
 // Appended to src/ui/sidebar.rs by nix/herdr-patches.nix. Everything is
 // prefixed `drip_` so it cannot collide with anything upstream grows, and it

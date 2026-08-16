@@ -588,14 +588,15 @@ drip.gumbo-usage` redraws now, after a `gumbo login` or a `gumbo use`.
 
 ## beads: the board you are on, in the sidebar
 
-> **This is a re-implementation of
+> **Both halves of this plugin come from
 > [herdr-beads](https://github.com/miiraheart/herdr-beads) (MIT).** That project
 > put a full [`bd`](https://github.com/steveyegge/beads) board — list, table and
 > kanban views, editing, dependency graphs — in a herdr pane, and the idea, the
-> status vocabulary and the glyphs below are all its. What is different here is
-> the surface: not a pane you open, but one line of sidebar that is always there,
-> and a click to unfold the rest. If you want the board, use theirs; this is the
-> ambient version of it.
+> status vocabulary and the glyphs below are all its. The rail described here is
+> a re-implementation for a surface it has no equivalent of: not a pane you open,
+> but one line of sidebar that is always there, and a click to unfold the rest.
+> The board is that project's own code, forked into `beads/board` —
+> `beads/board/UPSTREAM.md` records the rev it was taken at.
 
 Above the accounts rail, a summary line you can click:
 
