@@ -13,6 +13,16 @@
 # token names are herdr's, the colour names are the palette's, and the mapping
 # between them is the only opinion in this file.
 #
+# WHAT A PALETTE CANNOT SAY. herdr's two chrome planes accept `reset` — not a
+# colour but the terminal's own background, i.e. transparency — and a palette
+# has no way to express that: every value in one is a hue, and "no hue" is not
+# a darker or lighter member of the set. So `transparentChrome` is a flag on
+# `mkTheme` rather than a rung, and it is ON by default because transparent
+# chrome is the drip's appearance. Before it existed this file could not emit
+# the scheme its own config/herdr.toml carried, whatever palette it was handed,
+# and every host reading the generated config painted an opaque panel and
+# sidebar that the workstation did not have.
+#
 # WHY THE DEFAULT IS VENDORED. herdr-drip cannot take nix-env as a flake input:
 # nix-env depends on nix-claude-drip, which depends on THIS repo, so the input
 # would close a cycle. Our palette is nonetheless the DEFAULT — a host that
@@ -42,17 +52,27 @@ let
     peach = "#FAB387";
     blue = "#89B4FA";
     teal = "#94E2D5";
+    lavender = "#B4BEFE";
   };
 in
 {
-  # The role alias matters as much as the rungs: nix-env's `accent` points at
-  # green, and that is the single place this theme departs from herdr's stock
-  # Catppuccin (whose accent is blue). It is also what makes herdr's active
-  # borders agree with zellij's, where `ribbon_selected` and `frame_selected`
-  # are green — the two multiplexers stack on one screen, and an accent that
-  # disagreed would be the most visible seam between them.
+  # The role alias matters as much as the rungs, and this one is the single
+  # place the drip departs from the palette it otherwise follows: nix-env's
+  # `accent` points at GREEN, and herdr's accent here is LAVENDER.
+  #
+  # The reason is that herdr spends `green` on a meaning of its own. It is the
+  # done/idle mark on an agent row (see the state colours below), so an accent
+  # of the same hue paints the active pane border, the selection and "this
+  # agent has finished" in one colour — the two things you scan a sidebar for,
+  # made indistinguishable. Lavender is the palette's own rung, so this is
+  # still a re-point rather than a new colour; it costs the agreement with
+  # zellij's green `ribbon_selected`, which is a real loss and a smaller one
+  # than the collision.
+  #
+  # It is a DEFAULT, not a rule: a host passing a palette whose `accent` role
+  # says otherwise gets that, exactly as before.
   defaultPalette = mocha // {
-    accent = mocha.green;
+    accent = mocha.lavender;
   };
 
   # The herdr settings a palette implies: `[theme.custom]` plus the legacy
@@ -64,9 +84,17 @@ in
   # reports anything outside it as an unknown key. Notably ABSENT, because
   # herdr has no slot for them: a second selection surface (Catppuccin's
   # surface2), the darkest neutral (crust), and the accents herdr never
-  # names — rosewater, flamingo, pink, maroon, sky, sapphire, lavender.
+  # names — rosewater, flamingo, pink, maroon, sky, sapphire, lavender. No
+  # slot is not the same as unused: lavender has no token of its own and is
+  # still what `accent` resolves to under the default palette.
+  #
+  # `transparentChrome` is the one input that is not a colour — see the note
+  # at the top of this file for why it cannot be one.
   mkTheme =
-    palette:
+    {
+      palette,
+      transparentChrome ? true,
+    }:
     let
       # Role first, base name second. nix-env's palette carries both, so the
       # fallback is for a palette handed in as bare Catppuccin rungs with no
@@ -74,6 +102,11 @@ in
       pick = role: name: palette.${role} or palette.${name};
 
       accent = pick "accent" "green";
+
+      # `reset` is herdr's spelling of "no colour here"; the parser takes it
+      # wherever a token takes a hex (src/config/theme.rs), and it is what
+      # herdr already ships `sidebar_bg` as.
+      chrome = if transparentChrome then "reset" else pick "bg_alt" "mantle";
     in
     {
       theme.custom = {
@@ -81,22 +114,40 @@ in
         inherit accent;
 
         # The two chrome planes. herdr's `panel_bg` is the tab bar, floating
-        # panels, overlays and modals; `sidebar_bg` is the desktop sidebar and
-        # ships as `Reset` (the terminal's own background) rather than a
-        # colour. Both take `bg_alt` — one chrome plane, which is how the
-        # zellij theme has it too (`text_unselected` / `list_unselected`
-        # background = mantle), so the rail and the topbar above it are the
-        # same shade instead of two near-misses.
-        panel_bg = pick "bg_alt" "mantle";
-        sidebar_bg = pick "bg_alt" "mantle";
+        # panels, overlays and modals; `sidebar_bg` is the desktop sidebar,
+        # and herdr's own default for it is `Reset` — the terminal's own
+        # background — rather than a colour.
+        #
+        # The drip keeps both on `Reset`, which is `transparentChrome`. herdr
+        # is not the outermost thing on the screen here: it sits inside zellij
+        # inside a terminal that has its own background (and, on a
+        # transparent one, whatever is behind that). Painting `mantle` across
+        # the tab bar and the sidebar puts a near-black slab over it that
+        # differs from the surrounding shell by a shade or two — the seam is
+        # visible and buys nothing, whereas inheriting means there is no seam
+        # to get wrong. A host that wants opaque chrome sets
+        # `transparentChrome = false` and gets `bg_alt`, which is the shade
+        # the zellij theme paints its own chrome with (`text_unselected` /
+        # `list_unselected` background = mantle).
+        panel_bg = chrome;
+        sidebar_bg = chrome;
 
-        # The surface ramp, dim -> bright: separators, then the background of
-        # a selected or focused row, then hover/active. herdr's names for the
-        # bottom rung differ from Catppuccin's (`surface_dim` is `base`, one
-        # below `surface0`), so the ordering is what is preserved here, not
+        # The surface ramp: separators, then the background of a selected or
+        # focused row, then hover/active. herdr's names for the bottom rung
+        # differ from Catppuccin's (`surface_dim` is `base`, one below
+        # `surface0`), so what is preserved here is the ROLE of each rung, not
         # the spelling.
+        #
+        # `surface0` takes `bg_alt` (mantle) rather than `bg_surface`, and
+        # that makes the ramp non-monotonic on purpose: with the chrome planes
+        # transparent it is the only opaque plane the sidebar and the tab bar
+        # have left, so it is a chrome shade doing chrome's job — the
+        # unselected tab, the selected row — and must read as slightly DARKER
+        # than the terminal behind it, not as the mid-grey slab `surface0`
+        # (#313244) would put there. `surface_dim` stays on `bg`, so
+        # separators sit a rung lighter than the plane they divide.
         surface_dim = pick "bg" "base";
-        surface0 = pick "bg_surface" "surface0";
+        surface0 = pick "bg_alt" "mantle";
         surface1 = palette.surface1;
 
         # Text hierarchy: muted (numbers, secondary info), brighter muted,

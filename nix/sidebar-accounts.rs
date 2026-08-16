@@ -5,8 +5,28 @@
 // prefixed `drip_` so it cannot collide with anything upstream grows, and it
 // reads ONE file -- it starts no processes, holds no credentials and knows
 // nothing about gumbo. The drip.gumbo-usage plugin writes that file with
-// `gumbo watch --format compact --tags`; when nothing writes it, every
-// function here returns empty and the sidebar is exactly what it was.
+// `gumbo watch --format compact --tags`.
+//
+// THE THREE STATES OF THAT FILE, because two of them used to look the same:
+//
+//   - ABSENT. Nothing has ever fed the rail, which on most boxes means no
+//     gumbo. Every function here returns empty and the sidebar is byte-
+//     identical to stock herdr. This is the one silent state, and it is silent
+//     on purpose: the patch is in the BINARY, so a host that never wanted an
+//     accounts rail must not grow one.
+//   - STALE. Something fed it and stopped. That used to be silent too, and it
+//     is the worse failure by far -- on a workstation you notice a rail that
+//     vanished, and in a kart nobody is looking (`dr-vsv2 — The gumbo accounts
+//     rail never shows in a kart: the sidebar patch renders a state file that
+//     nothing in a kart writes`). It now draws ONE row saying how old the feed
+//     is, graded `-` so the collapsed rail's dot is the hollow "nothing could
+//     be read" one rather than a colour that would be a claim about an
+//     account.
+//   - FRESH. The rail, as gumbo wrote it.
+//
+// The feeder writes its own failures into the same file in the same format
+// (see gumbo-usage/bin/watch), so "the watcher is up but gumbo is not
+// answering" arrives here as an ordinary row and needs no code on this side.
 //
 // The file's format is one line per row: `<severity><kind> <text>`, where
 // severity is g/y/r/- (green, yellow, red, unknown) and kind is `a` for a line
@@ -115,24 +135,72 @@ pub(crate) fn drip_accounts_lines() -> Vec<DripAccountLine> {
     cache.lines.clone()
 }
 
-/// Read and parse the file. Every failure -- no path, no file, unreadable,
-/// stale, malformed -- is the same answer: no rows, and the sidebar looks like
-/// stock herdr.
+/// A duration as the two or three characters a 19-column rail can spare.
+/// Minutes while that is still a number worth reading, then hours, then days
+/// -- the same ladder gumbo's own reset clocks use, so the row does not
+/// introduce a second way of spelling time into the rail.
+fn drip_short_age(age: std::time::Duration) -> String {
+    let secs = age.as_secs();
+    if secs < 90 * 60 {
+        format!("{}m", secs / 60)
+    } else if secs < 48 * 3600 {
+        format!("{}h", secs / 3600)
+    } else {
+        format!("{}d", secs / 86_400)
+    }
+}
+
+/// The one row a rail with no usable data draws.
+///
+/// Shaped like an account so everything downstream treats it as one: it opens
+/// a group, its first three characters are the head that [`drip_render_accounts`]
+/// paints with the account's grade, and its grade is `-`, which is the sidebar's
+/// existing word for "nothing could be read from this".
+fn drip_feed_row(note: &str) -> DripAccountLine {
+    DripAccountLine {
+        text: format!(" ⚠ {note}"),
+        severity: '-',
+        opens_account: true,
+    }
+}
+
+/// Read and parse the file.
+///
+/// An ABSENT or unstattable file is no rows at all -- nothing has ever fed the
+/// rail, and the sidebar looks like stock herdr. Anything else means something
+/// did feed it, and from there staying quiet would be hiding a fact: a file too
+/// old to trust, or one that cannot be read, draws a single row saying so. See
+/// the three states at the top of this file.
 fn drip_read_accounts() -> Vec<DripAccountLine> {
     let Some(path) = drip_accounts_path() else {
         return Vec::new();
     };
-    let fresh = std::fs::metadata(&path)
-        .and_then(|meta| meta.modified())
-        .map(|at| at.elapsed().is_ok_and(|age| age <= DRIP_ACCOUNTS_STALE))
-        .unwrap_or(false);
-    if !fresh {
-        return Vec::new();
-    }
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Ok(modified) = std::fs::metadata(&path).and_then(|meta| meta.modified()) else {
         return Vec::new();
     };
-    text.lines().filter_map(drip_parse_line).collect()
+    // A clock that went backwards leaves `elapsed()` an error; count that as
+    // age zero rather than as staleness, since the file is not what is wrong.
+    let age = modified.elapsed().unwrap_or_default();
+    if age > DRIP_ACCOUNTS_STALE {
+        return vec![drip_feed_row(&format!("feed {} old", drip_short_age(age)))];
+    }
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return vec![drip_feed_row("feed unreadable")];
+    };
+    let lines: Vec<DripAccountLine> = text.lines().filter_map(drip_parse_line).collect();
+    if !lines.is_empty() {
+        return lines;
+    }
+    // Nothing parsed, and the two ways that happens are opposite facts. An
+    // EMPTY file is the feeder saying "no accounts" -- it ran, it asked, there
+    // was nothing; that is a rail with nothing in it and no complaint to make.
+    // A file with bytes in it that none of them parsed is a format this build
+    // does not know, which is a break between the two halves and has to show.
+    if text.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![drip_feed_row("feed unreadable")]
+    }
 }
 
 /// `<severity><kind> <text>` -> a row. Anything else is dropped: a half-written
@@ -604,6 +672,60 @@ mod drip_accounts_tests {
         let short = drip_accounts_split(Rect::new(0, 0, 20, 6), &lines);
         assert_eq!(short.1, Rect::default());
         assert_eq!(short.0, Rect::new(0, 0, 20, 6));
+    }
+
+    #[test]
+    fn a_dead_feed_draws_one_row_that_says_how_old_it_is() {
+        // The row a stale file produces. It has to survive everything the real
+        // rows do -- the head split that colours an account's identity, the
+        // dot the collapsed rail derives -- because it goes through the same
+        // draw, and it must not claim a grade: `-` is the sidebar's word for
+        // "nothing could be read", and it renders the hollow dot.
+        let row = drip_feed_row("feed 12m old");
+
+        assert_eq!(row.severity, '-');
+        assert!(row.opens_account);
+        assert_eq!(row.text, " ⚠ feed 12m old");
+        assert_eq!(
+            row.text.chars().take(DRIP_HEAD_COLUMNS).collect::<String>(),
+            " ⚠ "
+        );
+        assert_eq!(drip_account_dots(&[row.clone()]), vec!['-']);
+        // 19 columns is the compact layout's width and the narrowest rail the
+        // writer targets; a note that needed truncating there would lose the
+        // part that says how stale.
+        assert!(row.text.chars().count() <= 19);
+    }
+
+    #[test]
+    fn the_feeders_own_status_row_parses_like_any_other() {
+        // gumbo-usage/bin/watch writes this line verbatim when it cannot get a
+        // frame out of gumbo. Every other line in the file is gumbo's, so this
+        // is the one whose format could silently stop matching -- and if it
+        // did, the failure it exists to report would go back to being invisible.
+        let parsed = line("-a  ⚠ feed down");
+
+        assert_eq!(parsed.severity, '-');
+        assert!(parsed.opens_account);
+        assert_eq!(parsed.text, " ⚠ feed down");
+        assert_eq!(
+            parsed.text.chars().take(DRIP_HEAD_COLUMNS).collect::<String>(),
+            " ⚠ "
+        );
+    }
+
+    #[test]
+    fn a_feed_age_is_two_or_three_characters() {
+        use std::time::Duration;
+
+        assert_eq!(drip_short_age(Duration::from_secs(0)), "0m");
+        assert_eq!(drip_short_age(Duration::from_secs(11 * 60)), "11m");
+        // The ladder steps at 90 minutes and again at two days, so nothing is
+        // ever reported as "154m" or "73h".
+        assert_eq!(drip_short_age(Duration::from_secs(89 * 60)), "89m");
+        assert_eq!(drip_short_age(Duration::from_secs(90 * 60)), "1h");
+        assert_eq!(drip_short_age(Duration::from_secs(47 * 3600)), "47h");
+        assert_eq!(drip_short_age(Duration::from_secs(48 * 3600)), "2d");
     }
 
     #[test]

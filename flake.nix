@@ -53,6 +53,55 @@
         ) (import ./nix/drip-plugins.nix pkgs).all)
       );
 
+      # The two halves of the colour scheme, checked against each other.
+      #
+      # `nix/theme.nix` GENERATES herdr's tokens from a palette, and
+      # `config/herdr.toml` carries the render of that for the default palette
+      # because apply-config.sh links the file verbatim and the non-nix dev
+      # loop needs a theme too. Nothing forced the two to agree, so they
+      # stopped: four values in the TOML were edited past what the generator
+      # could emit, and the result was a workstation and a kart that could not
+      # be made to look alike (`dr-50bg — A kart's herdr uses the palette
+      # defaults where the workstation uses four hand-set values, so their
+      # colour schemes cannot match`). The drift was silent for as long as it
+      # took someone to look at a kart.
+      #
+      # So it is a check now. It compares the whole `[theme.custom]` block and
+      # the legacy `ui.accent` alongside it, and prints the keys that differ
+      # rather than just failing — the fix is always "re-render both halves
+      # together", and the useful part is knowing which lines to move.
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          theme = import ./nix/theme.nix;
+          rendered = theme.mkTheme { palette = theme.defaultPalette; };
+          tracked = builtins.fromTOML (builtins.readFile ./config/herdr.toml);
+        in
+        {
+          theme-render =
+            pkgs.runCommand "herdr-drip-theme-render"
+              {
+                generated = builtins.toJSON (rendered.theme.custom // { inherit (rendered.ui) accent; });
+                trackedJson = builtins.toJSON (tracked.theme.custom // { inherit (tracked.ui) accent; });
+                nativeBuildInputs = [ pkgs.jq ];
+              }
+              ''
+                printf '%s' "$generated" | jq -S . > generated.json
+                printf '%s' "$trackedJson" | jq -S . > tracked.json
+                if ! diff -u tracked.json generated.json > theme.diff; then
+                  echo "config/herdr.toml is not nix/theme.nix's render of the default palette." >&2
+                  echo "-config/herdr.toml  +nix/theme.nix:" >&2
+                  cat theme.diff >&2
+                  echo >&2
+                  echo "Change colours in the palette, not the TOML, and re-render both halves together." >&2
+                  exit 1
+                fi
+                touch $out
+              '';
+        }
+      );
+
       # Hardcore plugins — the drip's source patches on herdr itself, for
       # what herdr has no plugin surface for. One function so every consumer
       # applies the identical set; see nix/herdr-patches.nix for the rules

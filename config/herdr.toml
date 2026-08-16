@@ -41,20 +41,22 @@ auto_switch = false
 # links this file verbatim — the non-nix dev loop needs a theme too. Change
 # colours in the palette, not here, and re-render both together.
 #
-# FOUR VALUES BELOW ARE CURRENTLY HAND-SET AND DIVERGE FROM THE GENERATOR
-# (marked `hand-set`). nix/theme.nix still emits the palette's answer for each,
-# and on the nix path it wins at priority 900 — so a fleet host renders the OLD
-# scheme and only a host running apply-config.sh sees what is written here.
-# That split is deliberate but temporary: two of them cannot be expressed as a
-# palette colour at all (`reset` is transparency, not a hue), so closing it
-# needs an option on the module rather than a new hex. Until then, treat this
-# block as ahead of the generator, not as its render.
+# NOTHING BELOW IS HAND-SET ANY MORE. Four of these values used to be, and
+# a host reading the generated config therefore rendered a different scheme
+# from a host reading this file — the bug behind `dr-50bg — A kart's herdr
+# uses the palette defaults where the workstation uses four hand-set values,
+# so their colour schemes cannot match`. Two of the four could not be closed
+# by editing a palette at all (`reset` is transparency, not a hue), which is
+# why `theme.transparentChrome` exists. That every line here is now the
+# generator's own output is one command to check, and README.md has it.
 [theme.custom]
-accent = "#B4BEFE"      # hand-set: lavender. Palette accent is green (-> #A6E3A1).
-panel_bg = "reset"      # hand-set: the terminal's own bg, so the chrome is transparent.
-sidebar_bg = "reset"    # hand-set: same, for the sidebar plane.
+accent = "#B4BEFE"      # lavender. Not the palette's `accent` role (green):
+                        # herdr spends green on done/idle agents.
+panel_bg = "reset"      # the terminal's own bg, so the chrome is transparent
+sidebar_bg = "reset"    # same, for the sidebar plane (herdr's own default)
 surface_dim = "#1E1E2E" # separators (bg -> base)
-surface0 = "#181825"    # hand-set: mantle. Unselected tab bg (and every selected row).
+surface0 = "#181825"    # mantle. Unselected tab bg, and every selected row:
+                        # the only opaque plane left, so it is a chrome shade.
 surface1 = "#45475A"    # hover / active
 overlay0 = "#6C7086"    # muted text: numbers, secondary info
 overlay1 = "#7F849C"    # brighter muted text

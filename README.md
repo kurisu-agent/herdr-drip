@@ -64,12 +64,24 @@ The config is path-free: keybindings reach the plugins through
 ### The colour scheme
 
 `[theme.custom]` in the curated config is our palette — Catppuccin Mocha with
-`accent` pointed at green — mapped onto herdr's seventeen theme tokens. It is
-the same palette the zellij theme renders from, mapped the same way, because
-the two stack on one screen: herdr's chrome sits on `mantle` like zellij's
-topbar, and its active borders are green like zellij's `ribbon_selected`. The
-one departure from stock herdr is that accent: herdr's own Catppuccin uses
-blue.
+`accent` pointed at lavender — mapped onto herdr's seventeen theme tokens. It
+is the same palette the zellij theme renders from, because the two stack on one
+screen, but two of the mappings are herdr's own and worth knowing:
+
+- **the chrome is transparent, not painted.** `panel_bg` and `sidebar_bg` are
+  `reset` — the terminal's own background — rather than `mantle`. herdr is not
+  the outermost thing on screen here, so an opaque plane a shade off from the
+  shell around it is a visible seam for nothing. `theme.transparentChrome =
+  false` paints them instead.
+- **the accent is lavender, not the palette's green.** herdr spends `green` on
+  the done/idle mark of an agent row, and an accent of the same hue paints
+  "focused" and "finished" identically. It costs the agreement with zellij's
+  green `ribbon_selected`, which is the smaller loss.
+
+`surface0` follows from the first of those: with both chrome planes
+transparent it is the only opaque plane the sidebar and tab bar have left, so
+it takes `bg_alt` (mantle) and reads as slightly darker than the terminal
+behind it, rather than the mid-grey `surface0` (#313244) would put there.
 
 **Change colours in the palette, not in the TOML.** `nix/theme.nix` holds the
 mapping and generates the block; `config/herdr.toml` carries the render of it
@@ -81,8 +93,17 @@ matters — and that they agree at all is one command to check:
 ```
 nix-instantiate --eval -E '
   let t = import ./nix/theme.nix; c = builtins.fromTOML (builtins.readFile ./config/herdr.toml);
-  in (t.mkTheme t.defaultPalette).theme.custom == c.theme.custom'
+  in (t.mkTheme { palette = t.defaultPalette; }).theme.custom == c.theme.custom'
 ```
+
+Keeping that `true` is the whole job: while it was false — four values in the
+TOML hand-set past what the generator could emit — a workstation reading the
+file and a kart reading the generated config could not be made to look alike by
+any amount of bumping (`dr-50bg — A kart's herdr uses the palette defaults
+where the workstation uses four hand-set values, so their colour schemes cannot
+match`). So it is also `nix flake check` now — `checks.<system>.theme-render`
+compares the same two blocks plus `ui.accent`, and prints the keys that differ
+instead of just failing.
 
 `theme.auto_switch` stays off on purpose: custom tokens are applied on top of
 whichever base theme is selected, so following the terminal into light mode
@@ -294,6 +315,13 @@ falling back to the Catppuccin names for a palette with no role layer — so
 re-tinting means editing one palette, not this repo. `theme.enable = false`
 generates no theme at all.
 
+One thing a palette cannot carry, because every value in one is a hue:
+**transparency**. `theme.transparentChrome` (default `true`) is that knob —
+on, `panel_bg` and `sidebar_bg` are herdr's `reset` and inherit the terminal's
+background; off, they take `bg_alt`. It is an option rather than a rung
+because "no colour" is not a darker member of a colour set, and without it the
+generator could not emit the drip's own appearance at all.
+
 That default is *vendored*, and it has to be: nix-env depends on
 nix-claude-drip, which depends on this repo, so a `nix-env` flake input here
 would close a cycle. `nix/theme.nix` therefore copies the Catppuccin Mocha
@@ -485,15 +513,32 @@ Three pieces, deliberately:
   The two cadences are independent on purpose: the meters change slowly, but
   `▸` moves the moment a new session is placed, and only the daemon knows.
 - **`drip.gumbo-usage`** (this plugin) runs `gumbo watch --format compact
-  --tags --out <file>` from a `[[startup]]` hook and keeps it alive.
+  --tags --out <file>` from a `[[startup]]` hook and keeps it alive — retrying
+  with backoff for as long as the server lives, and writing a status row into
+  the same file while it cannot.
 - **the `sidebar-accounts` hardcore patch** reads that one file and draws it.
 
 The patch knows nothing about gumbo — it reads tagged lines
 (`<severity><kind> <text>`) and paints them. Anything that writes that format
-feeds the rail, and when nothing does, every function in it returns empty and
-the sidebar is byte-identical to stock herdr. A file older than ten minutes
-counts as nothing: a watcher that died leaves its last frame behind, and
-hour-old headroom shown as current is the number you would act on.
+feeds the rail.
+
+**No file and a dead feed are different facts, and the rail says which.** With
+no file at all every function returns empty and the sidebar is byte-identical
+to stock herdr — that is the box with no gumbo, and it stays silent. A file
+that exists but is older than ten minutes is a watcher that died: its last
+frame is not shown (hour-old headroom presented as current is the number you
+would act on), and in its place one grey row says how old the feed is. The
+watcher writes the same kind of row itself while it is failing, so `⚠ feed
+down` in the rail means the plugin is up and gumbo is not answering. This is
+what `dr-vsv2 — The gumbo accounts rail never shows in a kart: the sidebar
+patch renders a state file that nothing in a kart writes` cost: on a
+workstation you notice a rail that vanished, and in a kart nobody is looking.
+
+The one state still indistinguishable from "no gumbo here" is the plugin's
+startup hook never running at all — nothing writes the file, so there is
+nothing to read. That is a lifecycle problem rather than a display one, and
+the kart's copy of it is fixed in drift-rust's guest layer, where `herdr
+server` now starts after the drip's plugins are linked.
 
 Overrides, for a wider sidebar or a different cadence — set them in the herdr
 **server's** environment:
@@ -506,8 +551,13 @@ HERDR_DRIP_ACCOUNTS_INTERVAL  # default: 5 (seconds between redraws, NOT between
 
 `gumbo` must be on the herdr server's PATH — it is not a dependency of this
 repo, and a host without it simply gets no rail (the plugin says so once in its
-log and exits). `herdr plugin action invoke sync --plugin drip.gumbo-usage`
-redraws now, after a `gumbo login` or a `gumbo use`.
+log and exits, and that is the one failure it keeps quiet: with no gumbo
+installed there was never a rail to be missing). With gumbo present, the
+watcher retries for as long as the server lives — 30s doubling to 5 minutes,
+never giving up — because in a kart the first attempts race the unit that
+materialises gumbo's endpoint, and a permanent surrender there left the rail
+dead until somebody restarted herdr. `herdr plugin action invoke sync --plugin
+drip.gumbo-usage` redraws now, after a `gumbo login` or a `gumbo use`.
 
 ## beads: the board you are on, in the sidebar
 

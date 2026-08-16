@@ -97,9 +97,17 @@ herdrPkg.overrideAttrs (old: {
     # The patched code reads ONE file and nothing else — no process, no
     # credential, no knowledge of gumbo — so the thing it displays stays
     # replaceable: drip.gumbo-usage feeds it with `gumbo watch --format compact
-    # --tags`, and with nothing feeding it every function returns empty and the
-    # sidebar is byte-identical to stock. See sidebar-accounts.rs for the
-    # format and the layout rules.
+    # --tags`, and with NO file at all every function returns empty and the
+    # sidebar is byte-identical to stock.
+    #
+    # That last part is only true of a file that has never existed. A file that
+    # was being written and stopped draws one row saying how old it is, and the
+    # feeder writes its own failures into the same file in the same format, so
+    # a broken rail is a visible rail. Silence used to cover both, and a kart
+    # is exactly where nobody notices (`dr-vsv2 — The gumbo accounts rail never
+    # shows in a kart: the sidebar patch renders a state file that nothing in a
+    # kart writes`). See sidebar-accounts.rs for the three states, the format
+    # and the layout rules.
     cat ${./sidebar-accounts.rs} >> src/ui/sidebar.rs
 
     # The carve goes in herdr's OWN section geometry, not in the draw. Both
