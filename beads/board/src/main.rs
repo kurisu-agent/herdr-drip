@@ -190,9 +190,22 @@ fn main() -> Result<()> {
     }
 
     // Tag the pane so the launcher can find (and toggle) it via `herdr pane list`.
-    let pane_title = match mode {
-        Mode::Dock => "herdr-beads-dock",
-        Mode::Popup => "herdr-beads-board",
+    //
+    // DRIP CHANGE: the tag names the ENTRYPOINT when herdr tells us which one
+    // we are, and only falls back to the mode. There is no `plugin.pane.list`
+    // RPC and PaneInfo carries no plugin_id, so this string is the only handle
+    // a launcher has on its own pane -- and two of our three entrypoints run
+    // `--mode popup` (a tab is a popup-mode board that happens to fill a tab),
+    // which under the old rule gave them the same tag and let the tab key
+    // close a floating board.
+    let entrypoint = std::env::var("HERDR_PLUGIN_ENTRYPOINT_ID").unwrap_or_default();
+    let pane_title = if entrypoint.is_empty() {
+        match mode {
+            Mode::Dock => "herdr-beads-dock".to_string(),
+            Mode::Popup => "herdr-beads-board".to_string(),
+        }
+    } else {
+        format!("herdr-beads-{entrypoint}")
     };
     enable_raw_mode()?;
     let mut out = io::stdout();
@@ -200,7 +213,7 @@ fn main() -> Result<()> {
         out,
         EnterAlternateScreen,
         EnableMouseCapture,
-        SetTitle(pane_title)
+        SetTitle(&pane_title)
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(out))?;
 

@@ -141,6 +141,29 @@ key = "prefix+a"
 command = "herdr plugin action invoke toggle --plugin drip.agent-scope"
 description = "agents: this space / every space"
 
+# Ctrl+b B / Ctrl+b O — the two ways to open the bd board the sidebar rail is
+# a glance at. Both toggle: a second press closes what the first opened, which
+# is what makes them worth a key rather than a menu item.
+#
+# Shifted because the unshifted letters are herdr's own (prefix+b collapses the
+# sidebar, prefix+o cycles panes), and a board is something you open a few times
+# a day rather than mid-sentence. NOT prefix+shift+k, which reads better for a
+# kanban board and is herdr's swap_pane_up: a custom command that collides with
+# a built-in binding is silently DISABLED in favour of the built-in
+# (config/keybinds.rs), so that key would have looked bound and done nothing.
+#
+# Path-free, like every other entry here: the command resolves on the server's
+# PATH and the plugin's own root is the plugin's business.
+[[keys.command]]
+key = "prefix+shift+b"
+command = "herdr plugin action invoke open-dock --plugin drip.beads"
+description = "beads: dock the board on the left"
+
+[[keys.command]]
+key = "prefix+shift+o"
+command = "herdr plugin action invoke open-tab --plugin drip.beads"
+description = "beads: open the board in a tab"
+
 [experimental]
 kitty_graphics = true
 pane_history = true

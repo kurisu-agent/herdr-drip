@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Toggle the board as a tab of this workspace. See bin/open-dock.
+set -uo pipefail
+
+root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "bun is not on the herdr server's PATH; cannot open the beads tab" >&2
+  exit 0
+fi
+
+exec bun "$root/bin/open.js" tab

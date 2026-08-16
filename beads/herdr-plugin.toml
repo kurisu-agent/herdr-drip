@@ -21,6 +21,73 @@ platforms = ["linux", "macos"]
 [[startup]]
 command = ["bin/watch"]
 
+# ---------------------------------------------------------------------------
+# The board, as three ways of opening one binary.
+#
+# `./target/release/herdr-beads` is where nix/beads-board.nix's build is
+# spliced in (nix/drip-plugins.nix), standing in for the `[[build]]` this
+# manifest deliberately does not declare -- `herdr plugin link` never runs one
+# and a store path has no toolchain to run it with. On a LINKED WORKING TREE
+# there is no splice, so `cargo build --release` in board/ once, by hand.
+#
+# The leading `./` is load-bearing: herdr hands a pane command to portable_pty's
+# CommandBuilder, which only treats it as a path when it contains a `/` and
+# otherwise looks it up on PATH.
+#
+# `placement` here is only a DEFAULT -- the open request's --placement wins
+# (`params.placement.unwrap_or(pane.placement)`), so any of these can be opened
+# any way. What each entrypoint really fixes is its `--mode`, which is the
+# board's own idea of how much room it has: Dock starts in List with no detail
+# pane, Popup starts in Kanban with one. Note that `--mode` understands `dock`
+# and nothing else -- every other value, `tab` included, means popup -- which is
+# why the tab entrypoint below asks for `popup` and is not a typo.
+#
+# The titles carry a Codicon because herdr makes the manifest title the pane's
+# label (`set_manual_label`), so it is what the tab bar and the sidebar show.
+# Same font plane as the rename presets (nix/rename-presets.rs), same reason:
+# one cell wide, and the word is right there if the font has no glyph.
+
+[[panes]]
+id = "dock"
+title = "\ueab3 Beads"  # cod-checklist
+description = "The board as a narrow column: list view, no detail pane"
+placement = "split"
+command = ["./target/release/herdr-beads", "--mode", "dock"]
+
+[[panes]]
+id = "tab"
+title = "\ueb30 Beads"  # cod-project
+description = "The board as a whole tab: kanban, with the detail pane open"
+placement = "tab"
+command = ["./target/release/herdr-beads", "--mode", "popup"]
+
+# The floating board. Declared but bound to no key: a popup has no pane id in
+# `pane list`, so nothing can find it again to toggle it closed -- and a
+# keybinding that only ever opens is a keybinding that stacks up popups.
+# `herdr plugin pane open --plugin drip.beads --entrypoint popup` still works,
+# and Esc closes it. width/height are accepted ONLY here; on any other
+# placement they fail the manifest load outright.
+[[panes]]
+id = "popup"
+title = "\ueb30 Beads"  # cod-project
+description = "The board as a floating popup over whatever you were doing"
+placement = "popup"
+width = "85%"
+height = "85%"
+command = ["./target/release/herdr-beads", "--mode", "popup"]
+
+[[actions]]
+id = "open-dock"
+title = "Beads: dock the board on the left"
+contexts = ["workspace", "tab", "pane"]
+command = ["bin/open-dock"]
+
+[[actions]]
+id = "open-tab"
+title = "Beads: open the board in a tab"
+contexts = ["workspace", "tab", "pane"]
+command = ["bin/open-tab"]
+
 [[actions]]
 id = "sync"
 title = "Refresh the beads rail now"
