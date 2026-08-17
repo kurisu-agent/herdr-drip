@@ -799,15 +799,18 @@ herdrPkg.overrideAttrs (old: {
     substituteInPlace src/app/input/mouse.rs \
       --replace-fail '                    if let Some(idx) = self.workspace_at_row(mouse.row) {' '                    if self.drip_toggle_tab_tree_at(mouse.column, mouse.row) { return None; } if let Some((ws_idx, pane_id)) = self.drip_sidebar_tab_target_at(mouse.row) { self.mode = Mode::Terminal; return Some(MouseAction::FocusPane { ws_idx, pane_id }); } if let Some(idx) = self.workspace_at_row(mouse.row) {'
 
-    # rename-presets: six named kinds of work in the rename dialog, one click
-    # each. The modal that names a pane, a tab or a space — and the one the
-    # `New Tab` and `New Space` gestures open to name what they are about to
-    # create — grows a list of presets under its input: `orchestration`,
-    # `implementation`, `research`, `spike`, `monitor`, `misc`, each behind a
-    # Codicon that is part of the name and therefore visible afterwards in the
-    # sidebar and the tab bar. Clicking one is the whole gesture: it fills the
-    # field and saves in the same click, so naming a pane is one click rather
-    # than a word typed the same way for the hundredth time and an Enter.
+    # rename-presets: twelve named kinds of work in the rename dialog, one
+    # click each. The modal that names a pane, a tab or a space — and the one
+    # the `New Tab` and `New Space` gestures open to name what they are about
+    # to create — grows a grid of presets under its input, four to a row:
+    # `orch`, `impl`, `recon`, `spike`, `watch`, `review`, `debug`, `triage`,
+    # `docs`, `deploy`, `bench`, `misc`, each behind a Codicon that is part of
+    # the name and therefore visible afterwards in the sidebar and the tab bar.
+    # Clicking one is the whole gesture: it fills the field and saves in the
+    # same click, so naming a pane is one click rather than a word typed the
+    # same way for the hundredth time and an Enter. Six characters is the
+    # ceiling on a name because four cells across a 56-column modal is thirteen
+    # columns each; a grid is what buys the six kinds a list could not afford.
     #
     # No plugin surface reaches it, and not narrowly: a plugin's reach is
     # `[[actions]]` (the palette and the keybindings), pane placements
@@ -830,9 +833,11 @@ herdrPkg.overrideAttrs (old: {
     # The modal grows to fit them. Stock passes `56, 7` in two places that have
     # to agree to the row — the renderer sizes the popup it DRAWS and
     # `rename_modal_inner` sizes the popup it HIT-TESTS — so both are pointed
-    # at one constant rather than at a second literal. A modal drawn 14 rows
-    # tall and hit-tested as 7 would put every button and every preset row
-    # somewhere other than where it appears.
+    # at one constant rather than at a second literal. A modal drawn 11 rows
+    # tall and hit-tested as 7 would put every button and every preset cell
+    # somewhere other than where it appears. The constant is derived from the
+    # grid's row count, so a preset added to the table moves both call sites or
+    # neither.
     substituteInPlace src/ui/dialogs.rs \
       --replace-fail '    let Some(inner) = render_modal_shell(frame, area, 56, 7, &app.palette) else {' '    let Some(inner) = render_modal_shell(frame, area, 56, crate::app::state::DRIP_RENAME_POPUP_HEIGHT, &app.palette) else {'
 
@@ -843,7 +848,7 @@ herdrPkg.overrideAttrs (old: {
     #
     # `save`/`clear`/`cancel` are placed by `centered_button_row` at a fixed
     # offset of 3 from the top of the rect it is handed, which in stock's
-    # 5-row inner was the last row but in a 12-row one is the middle of it —
+    # 5-row inner was the last row but in a 9-row one is the middle of it —
     # buttons stranded above the presets, with the modal's floor empty. Rather
     # than rewrite that offset (a multi-line anchor, at the mercy of nix's
     # indented-string stripping), both callers hand the function the BOTTOM
@@ -892,7 +897,7 @@ herdrPkg.overrideAttrs (old: {
     # `rename_modal_inner` where the modal is and then asks stock's
     # `rename_button_rects` where `save` is inside it — so with the modal
     # taller and the action row moved to its floor, it would click row 3 of a
-    # 12-row inner, which is now the presets' rule row: no preset, no button,
+    # 9-row inner, which is now the presets' rule row: no preset, no button,
     # and `unwrap_or(ModalAction::Cancel)` closes the dialog without renaming
     # anything. The test would fail on a rename the real dialog performs fine.
     # Routing it through the same `drip_rename_button_area` the handler uses
