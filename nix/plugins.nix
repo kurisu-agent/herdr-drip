@@ -422,7 +422,10 @@ in
           an allowlist cannot spell because a board may carry a status the
           plugin has never heard of;
         - `HERDR_DRIP_BEADS_SHOW_CLOSED` — `1` to include closed beads;
-        - `HERDR_DRIP_BEADS_INTERVAL` — seconds between rail refreshes (15);
+        - `HERDR_DRIP_BEADS_INTERVAL` — seconds between the watcher's backstop
+          refreshes (30). Focus changes do not wait for it: a `pane.focused`
+          event hook redraws the rail as they land, so this interval only bounds
+          how long a `bd` write nobody announced stays unseen;
         - `HERDR_DRIP_BEADS_LIMIT` — outer ceiling on beads written (40);
         - `HERDR_DRIP_BEADS_CWD` — pin both surfaces to one repo instead of
           following focus;

@@ -238,11 +238,26 @@ function boardCwd() {
     ? panes.filter((pane) => pane?.workspace_id === workspace)
     : panes;
 
-  const me = process.env.HERDR_PANE_ID ?? "";
+  // EVERY pane in the workspace is a candidate, the focused one included.
+  //
+  // This used to skip `HERDR_PANE_ID` as "the pane that asked", which is not
+  // what herdr puts in that variable for a plugin command: it is
+  // `context.focused_pane_id`, the FOCUSED pane of the workspace the command is
+  // about (`plugin_context_from_parts`). So there was no caller being excluded
+  // -- there was the pane whose board this rail exists to show. It cost nothing
+  // while the watcher was the only caller and its id was a stale one from server
+  // startup, and it would have blanked the rail outright once the
+  // `pane.focused` hook started running, in the ordinary case of a workspace
+  // whose only pane on a board is the one you are looking at.
+  //
+  // Nothing needs excluding in the other two paths either. Run by hand from a
+  // shell, HERDR_PANE_ID is that shell's own pane, which is sitting on the board
+  // you want. And the board's own pane loses on merit: it is not a candidate
+  // worth suppressing, it is a pane whose cwd is the repo the board is already
+  // showing.
   let best = null;
   let bestScore = -1;
   for (const pane of candidates) {
-    if (pane?.pane_id === me) continue;
     // Where the shell went beats where it was launched, but only while it is
     // still on a board: a pane that cd'd out to /tmp should not blank a rail
     // its launch directory can still fill. Falling back on falsiness alone

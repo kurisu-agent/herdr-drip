@@ -21,6 +21,42 @@ platforms = ["linux", "macos"]
 [[startup]]
 command = ["bin/watch"]
 
+# The rail follows FOCUS, and this is the half of that which is not a poll.
+#
+# bin/watch's interval is the backstop for changes nobody told us about -- a
+# `bd create` in a shell -- and it can afford to be slow. Focus cannot: the rail
+# shows the board of the pane you are on, so between a workspace switch and the
+# next tick it was showing the board of wherever you just were. Not late,
+# WRONG, for up to a whole interval, which is the one thing a rail must not be.
+#
+# ONE hook, and `pane.focused` is the one, because herdr tracks focus as the
+# (workspace, focused pane) PAIR and emits all three focus events from the same
+# block when that pair changes (`sync_focus_events` in its src/app/api.rs).
+# Measured on this box: a workspace switch fires workspace.focused,
+# tab.focused and pane.focused about 3 ms apart, and moving between two panes
+# inside ONE tab fires pane.focused as well -- which is the case the other two
+# would not cover on their own and the rail cares about, since a worktree pane
+# beside a main-checkout pane is two different boards. So pane.focused alone
+# covers every focus change there is, and adding its siblings would only spawn
+# bun three times per switch. There is no debounce field in this table -- the
+# hook runs per event -- so picking the narrowest sufficient event IS the
+# debounce, and it matters: plugin commands share a 32-in-flight ceiling across
+# every plugin on the box, which a held-down workspace key could otherwise eat.
+#
+# `bin/sync` and not something cheaper on purpose. The hook is handed
+# HERDR_PLUGIN_CONTEXT_JSON, whose `focused_pane_cwd` looks like it could pin
+# the repo and skip the `herdr pane list` bin/board.js does -- but that field is
+# the pane's LAUNCH cwd, where board.js deliberately prefers `foreground_cwd`
+# (a shell that has cd'd into a worktree is still reported at its launch dir),
+# and pinning HERDR_DRIP_BEADS_CWD would turn "this pane is not on a board"
+# into "bd could not answer", which KEEPS the last rail on screen instead of
+# clearing it -- reintroducing the bug this hook exists to fix, in the one case
+# where it is hardest to notice. What that buys is one round trip on a local
+# socket, against a bun start we pay either way. Not worth it.
+[[events]]
+on = "pane.focused"
+command = ["bin/sync"]
+
 # ---------------------------------------------------------------------------
 # The board, as three ways of opening one binary.
 #

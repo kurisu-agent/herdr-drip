@@ -5,23 +5,31 @@
 # TTL and lets that plugin's watcher be a respawn loop around one long-running
 # process -- so the interval lives here and each tick is a whole bin/sync.
 #
-# Fifteen seconds because the rail follows FOCUS as well as content: it shows
-# the board of whichever pane you are on, so moving between two repos has to
-# change the rail without you asking it to. A `bd list` on a local board is
-# milliseconds and the `herdr pane list` beside it is one socket call, so the
+# THIRTY seconds, and it used to be fifteen. The number was fifteen because the
+# rail follows FOCUS as well as content and a poll was the only thing that moved
+# it, so the interval was also the worst case for "I switched workspaces and the
+# rail still shows the last one". The manifest's `pane.focused` hook owns that
+# case now and answers it in one bun start, which leaves this loop with only the
+# changes nobody announces -- a `bd create` in a shell, an agent closing a bead
+# -- and half a minute is a fine age for a rail nobody asked to refresh.
+#
+# Not longer, because that is the whole backstop: with the hook doing the
+# noticing, a minute-long interval is a minute of a stale board on a screen
+# somebody is sitting in front of without touching. A `bd list` on a local board
+# is milliseconds and the `herdr pane list` beside it is one socket call, so the
 # cost of the tick is dominated by spawning bun -- which is why this is not one
-# second.
+# second either.
 set -uo pipefail
 
-interval=${HERDR_DRIP_BEADS_INTERVAL:-15}
+interval=${HERDR_DRIP_BEADS_INTERVAL:-30}
 # `:-` only guards unset and empty. A non-numeric or zero interval makes `sleep`
 # fail instantly, and the loop below has nothing else in it to slow down -- so
 # a typo in the server's environment becomes a bun fork storm against the herdr
 # socket rather than a rail that refreshes oddly. Fall back rather than exit:
 # the rail is worth more than the setting.
 if [[ ! $interval =~ ^[1-9][0-9]*$ ]]; then
-  echo "HERDR_DRIP_BEADS_INTERVAL=$interval is not a positive whole number; using 15" >&2
-  interval=15
+  echo "HERDR_DRIP_BEADS_INTERVAL=$interval is not a positive whole number; using 30" >&2
+  interval=30
 fi
 root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
 

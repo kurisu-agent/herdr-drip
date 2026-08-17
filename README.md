@@ -696,8 +696,16 @@ board you opened is still the board you opened. Within the space, focus decides
 only among panes that are *on* a board — a pane that has cd'd to `/tmp` does
 not blank a rail its neighbour can still fill, and `.beads` is looked for the
 way `git` looks for `.git`, walking up. Across spaces it does not decide at
-all: no board in this one is an empty rail, not a search of the others. That is
-what the 15s poll is buying, and why it is not 1s — each tick spawns bun.
+all: no board in this one is an empty rail, not a search of the others.
+
+**Two things move it, and they are not the same thing.** A `pane.focused`
+event hook redraws the rail the moment focus lands, so a workspace switch is
+not a rail that is briefly *wrong* — and one hook is enough because herdr
+tracks focus as the (workspace, focused pane) pair, so that single event also
+covers tab switches and moving between two panes of one tab. The 30s poll
+behind it is the backstop for what nobody announces: a `bd create` in a shell.
+It used to be 15s, when it was also the answer for focus. Neither is 1s,
+because each pass spawns bun.
 
 **Five rows, and the number they are five of.** The open rail asks for a row
 per line it is given, so an uncapped board would push the agent panel down to
@@ -720,7 +728,7 @@ Overrides, in the herdr **server's** environment (or from nix — see
 ```
 HERDR_DRIP_BEADS_FILE         # default: $XDG_STATE_HOME/herdr-drip/sidebar-beads.txt
 HERDR_DRIP_BEADS_OPEN_FILE    # default: alongside it, sidebar-beads.open
-HERDR_DRIP_BEADS_INTERVAL     # default: 15 (seconds between passes)
+HERDR_DRIP_BEADS_INTERVAL     # default: 30 (seconds between backstop passes; focus is a hook, not a poll)
 HERDR_DRIP_BEADS_ROWS         # default: 5 rows on the rail
 HERDR_DRIP_BEADS_LIMIT        # default: 40 beads written (the outer ceiling; the smaller wins)
 HERDR_DRIP_BEADS_STATUSES     # default: in_progress. Comma-separated, or `all` for the whole board
