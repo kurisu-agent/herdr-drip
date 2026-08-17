@@ -543,6 +543,40 @@ herdrPkg.overrideAttrs (old: {
     substituteInPlace src/ui/panes.rs \
       --replace-fail '.border_style(Style::default().fg(app.palette.accent))' '.border_style(Style::default().fg(app.palette.accent)).border_type(ratatui::widgets::BorderType::Rounded)'
 
+    # tab-pane-count: a tab bar label says how many panes the tab holds —
+    # `<icon> ·3 impl` — so the strip stops describing tabs as names alone. A tab
+    # with one agent in it and a tab with four look identical in stock herdr
+    # until you switch to it, and with shell-panes above, how many panes a tab
+    # holds IS how much work is parked in there.
+    #
+    # No plugin surface reaches a tab's own cell: a plugin's text surfaces are
+    # the sidebar's per-row tokens and the tab bar's right-hand status segments
+    # (`tab_bar_right`), which are global to the bar rather than per tab. The
+    # label itself is composed in the renderer from `custom_name` or the tab
+    # number.
+    #
+    # ONE anchor, because `tab_chrome_label` is the single place a tab bar
+    # label is composed — the renderer centres this string in the cell, and
+    # `tab_width` sizes the cell from `display_width_u16` of the same string.
+    # So the strip makes room for the marker without a line of layout code
+    # being touched; herdr's own `zoom_marker_counts_toward_tab_width` test is
+    # the proof that this is the path the existing `Z` marker rides too.
+    #
+    # Rebinding `name` on the line ABOVE the zoom check is what keeps it to one
+    # anchor: both of stock's branches read `name`, so the count reaches the
+    # zoomed and unzoomed labels alike without either `format!` being rewritten.
+    # The two markers then take opposite ENDS of the label — the count splices
+    # in behind the name's leading icon, `Z` stays the last thing in the cell —
+    # so a tab that is both reads `<icon> ·3 impl Z` and neither marker has an
+    # opinion about the other. See tab-pane-count.rs for why the count goes
+    # after the icon rather than at the end, why `·`, why nothing at all for a
+    # single-pane tab, and why the count comes from `layout.pane_count()`
+    # rather than from `panes.len()`.
+    cat ${./tab-pane-count.rs} >> src/ui/tabs.rs
+
+    substituteInPlace src/ui/tabs.rs \
+      --replace-fail '    if ws.tabs.get(tab_idx).is_some_and(|tab| tab.zoomed) {' '    let name = drip_tab_pane_count_label(ws, tab_idx, name); if ws.tabs.get(tab_idx).is_some_and(|tab| tab.zoomed) {'
+
     # sidebar-quiet-chrome: the sidebar's section labels go. Five words the
     # sidebar repeats at you every frame — `new` and `menu` under the
     # workspace list, `agents` over the agent panel, `grouped`/`priority` in
