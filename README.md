@@ -604,10 +604,10 @@ Above the accounts rail, a summary line you can click:
 
 ```
 ──────────────────────
-▾ beads       ●1 ◐2 ○5
- ● dr-14 turnpike egress
- ◐ dr-09 injector retry
- ○ dr-02 kart lifecycle
+▾ beads             ◐3
+◐ dr-09 injector retry
+◐ dr-14 turnpike egress
+◐ dr-02 kart lifecycle
 ```
 
 Click the summary and it folds back to the one line. The counts are
@@ -615,12 +615,39 @@ blocked/in-progress/open, in that order, and they are dropped from the **right**
 as the sidebar narrows — so the blocked count is the last thing to go, being the
 one worth interrupting yourself for.
 
-Below it, the board itself, **worst status first**: blocked, then in progress,
-then open, each group by bd priority. That is deliberately *not*
-herdr-beads' order, which opens with `open` and reads better in a pane the size
-of a board. Here the list is truncated to whatever rows the sidebar has left
-after the agent panel, and a list that drops its tail has to keep the blocked
-rows at the top or the truncation lies.
+**What is in progress, in this space.** Two words that are both defaults rather
+than rules, and both of them narrow what the rail used to show:
+
+- `statuses` is `in_progress` unless a host says otherwise. Five rows can
+  answer one question well, and "what am I in the middle of" is the one worth
+  the space; five of forty-two open beads, chosen by a sort, is a list nobody
+  decided to look at. `HERDR_DRIP_BEADS_STATUSES=all` is the old whole board,
+  and any comma-separated vocabulary is a rail of that instead.
+- the board is the **focused workspace's**. The rail is drawn beside the list
+  of spaces, so a board from a space you are not in is a rail about somebody
+  else's repo sitting under your agents. Move to a space with no board and the
+  rail goes away rather than falling back to one it can still find, which is
+  what it used to do.
+
+When more than one status reaches the rail it is ordered **worst first**:
+blocked, then in progress, then open, each group by bd priority. That is
+deliberately *not* herdr-beads' order, which opens with `open` and reads better
+in a pane the size of a board. Here the list is truncated to whatever rows the
+sidebar has left after the agent panel, and a list that drops its tail has to
+keep the blocked rows at the top or the truncation lies.
+
+On a board with nothing in progress the rail says so rather than going away:
+
+```
+──────────────────────
+▾ beads
+• nothing in progress
+```
+
+That sentence is a row in the file like any other (`--`, the unknown status),
+written by the plugin rather than known to herdr, so which words appear follow
+the vocabulary the rail is filtered to. A rail that vanished instead would be
+read as a broken rail, every time somebody closed their last bead.
 
 The glyphs are herdr-beads' `status_glyph`, kept identical so the two read as
 the same tool:
@@ -648,20 +675,21 @@ Three pieces, the same shape gumbo-usage has:
 
 - **[`bd`](https://github.com/steveyegge/beads)** owns the board. Nothing in
   the rail writes to it — the board pane below does, with the same `bd`.
-- **`drip.beads`** (this plugin) asks herdr which pane is focused, runs
-  `bd list --json` in that pane's directory, and writes one line per bead to a
-  file. Every call is an argv vector rather than a shell string, which is
-  herdr-beads' discipline and worth keeping: bead titles are arbitrary text.
+- **`drip.beads`** (this plugin) asks herdr which workspace is focused and
+  which of its panes is on a board, runs `bd list --json` in that pane's
+  directory, and writes one line per bead to a file. Every call is an argv
+  vector rather than a shell string, which is herdr-beads' discipline and worth
+  keeping: bead titles are arbitrary text.
 - **the `sidebar-beads` hardcore patch** reads that one file and draws it.
 
 The rail **follows focus**, which the board pane resolves once at startup and
-then keeps: move to another repo and the rail is that repo's board, while the
-board you opened is still the board you opened. Focus decides only among panes
-that are *on* a board, though — move to one that has no `.beads` anywhere above
-it and the rail keeps showing whichever other pane's board it can find, rather
-than going blank because the pane you happen to be typing in is not a repo.
-That is what the 15s poll is buying, and why it is not 1s — each tick spawns
-bun.
+then keeps: move to another space and the rail is that space's board, while the
+board you opened is still the board you opened. Within the space, focus decides
+only among panes that are *on* a board — a pane that has cd'd to `/tmp` does
+not blank a rail its neighbour can still fill, and `.beads` is looked for the
+way `git` looks for `.git`, walking up. Across spaces it does not decide at
+all: no board in this one is an empty rail, not a search of the others. That is
+what the 15s poll is buying, and why it is not 1s — each tick spawns bun.
 
 **Five rows, and the number they are five of.** The open rail asks for a row
 per line it is given, so an uncapped board would push the agent panel down to
@@ -687,9 +715,9 @@ HERDR_DRIP_BEADS_OPEN_FILE    # default: alongside it, sidebar-beads.open
 HERDR_DRIP_BEADS_INTERVAL     # default: 15 (seconds between passes)
 HERDR_DRIP_BEADS_ROWS         # default: 5 rows on the rail
 HERDR_DRIP_BEADS_LIMIT        # default: 40 beads written (the outer ceiling; the smaller wins)
-HERDR_DRIP_BEADS_STATUSES     # comma-separated: which statuses reach the rail
+HERDR_DRIP_BEADS_STATUSES     # default: in_progress. Comma-separated, or `all` for the whole board
 HERDR_DRIP_BEADS_SHOW_CLOSED  # 1 to include closed beads (costs a second bd call)
-HERDR_DRIP_BEADS_CWD          # pin the board to one directory, instead of following focus
+HERDR_DRIP_BEADS_CWD          # pin the board to one directory, instead of following the focused space
 HERDR_DRIP_BEADS_CONFIG       # default: $HERDR_PLUGIN_CONFIG_DIR/config.json
 HERDR_DRIP_BD_BIN             # default: bd
 ```
@@ -698,8 +726,10 @@ The last two are where the rail stops being alone. `config.json` in the
 directory herdr gives every plugin is **one file the rail and the board both
 read** — `statuses` (an order to the board, a filter to the rail),
 `show_closed`, and `rail_rows` — so the two surfaces cannot disagree about what
-a board is. Environment beats file, so the table above is still the quick way
-to change one. `beads/board/src/config.rs` is the format's description.
+a board is. One key, two defaults, because they are two surfaces: unset, the
+board opens on everything in its own order and the rail shows what is in
+progress. Set it and both obey it. Environment beats file, so the table above
+is still the quick way to change one. `beads/board/src/config.rs` is the format's description.
 
 `sidebar-beads.open` is read once, the first time the sidebar draws, and written
 on every click. So editing it from outside sets what the **next** server starts

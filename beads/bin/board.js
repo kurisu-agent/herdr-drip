@@ -1,4 +1,11 @@
-// The beads rail's contents: one line per bead, worst status first.
+// The beads rail's contents: the focused workspace's board, in progress, one
+// line per bead and worst status first.
+//
+// Both halves of that first line are settings with defaults rather than rules
+// -- `statuses` says what the rail is a list OF (`in_progress` unless a host
+// says otherwise), and the workspace is whichever one herdr says is focused
+// when this runs, every fifteen seconds. See `configuredStatuses` and
+// `focusedWorkspace`.
 //
 // A RE-IMPLEMENTATION of the read half of herdr-beads
 // (https://github.com/miiraheart/herdr-beads, MIT). The `bd` bridge below is
@@ -65,25 +72,39 @@ function readConfig() {
 
 const CONFIG = readConfig();
 
+// What the rail shows when nobody says otherwise: the work that is running.
+//
+// The rail is five rows kept on screen while you do something else, and the
+// only question five rows can answer well is "what am I in the middle of".
+// Showing the whole board there meant five of forty-two open beads, picked by
+// a sort rather than by anyone -- a list nobody had decided to look at, in the
+// space where the thing you ARE looking at should be. What is blocked and what
+// is open have not gone anywhere: they are on the board, which is what the
+// rail's last row opens.
+const DEFAULT_STATUSES = ["in_progress"];
+
 // Which statuses may appear, or `null` for "everything the board has". Env
 // (comma-separated) beats file, which is the layering every other knob here
 // has and what lets a nix module set this without writing a file.
 //
-// Unset means unset, NOT "everything in RAIL_ORDER": a board with a custom
-// status has always had it on the rail, ranked last, and an allowlist that
-// silently dropped it would be a filter nobody asked for. Where the board
-// reads this list as an ORDER, the rail reads it as a filter -- a rail is a
-// handful of rows, so a vocabulary is the only thing it can be.
+// `all` is the word for the old behaviour, and it has to be a word rather than
+// an empty setting: a board can carry a status this file has never heard of
+// (RAIL_ORDER ranks those last rather than dropping them), and an allowlist
+// cannot name what it does not know. Unset is the default above, not `all` --
+// a rail that shows everything is a rail nobody reads.
+//
+// Where the board reads this list as an ORDER, the rail reads it as a filter
+// -- a rail is a handful of rows, so a vocabulary is the only thing it can be.
 function configuredStatuses() {
   const fromEnv = process.env.HERDR_DRIP_BEADS_STATUSES;
   const raw = fromEnv !== undefined && fromEnv !== ""
     ? fromEnv.split(",")
     : Array.isArray(CONFIG.statuses)
       ? CONFIG.statuses
-      : null;
-  if (!raw) return null;
+      : DEFAULT_STATUSES;
   const clean = raw.map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean);
-  return clean.length > 0 ? clean : null;
+  if (clean.length === 0) return DEFAULT_STATUSES;
+  return clean.includes("all") ? null : clean;
 }
 
 // Closed beads are what is DONE, and the rail is what is left, so they are off
@@ -148,6 +169,38 @@ function run(cmd, args, opts = {}) {
   return proc.stdout.toString();
 }
 
+// Which workspace the rail is showing, as a workspace id, or `null` when that
+// cannot be established.
+//
+// There is ONE rail, in the sidebar, next to the list of workspaces -- so the
+// board it shows has to be the board of the workspace you are looking at, or
+// it is a rail about somebody else's repo sitting under your agents. The
+// `focused` flag on a pane is exactly that question already answered: herdr
+// sets it for the active workspace's active tab's focused pane and for no
+// other pane in the session (`pane_info` in its creation.rs), so the focused
+// pane names the focused workspace.
+//
+// `workspace list` is the second ask, for the case that flag cannot answer --
+// a workspace whose panes are all gone, or a session mid-switch. It carries
+// the same `focused` bool per workspace and costs one socket call, which is
+// why it is the fallback rather than the first question.
+function focusedWorkspace(panes, bin) {
+  const fromPane = panes.find((pane) => pane?.focused === true)?.workspace_id;
+  if (typeof fromPane === "string" && fromPane) return fromPane;
+
+  const out = run(bin, ["workspace", "list"]);
+  if (typeof out !== "string" || !out) return null;
+  let workspaces;
+  try {
+    workspaces = JSON.parse(out)?.result?.workspaces;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(workspaces)) return null;
+  const found = workspaces.find((ws) => ws?.focused === true)?.workspace_id;
+  return typeof found === "string" && found ? found : null;
+}
+
 // Where the board is. herdr runs plugin commands in the PLUGIN's directory,
 // which has no `.beads`, so the repo has to be asked for -- the same problem
 // herdr-beads solves in `resolve_repo_cwd`, and the same answer: ask herdr
@@ -175,10 +228,20 @@ function boardCwd() {
   }
   if (!Array.isArray(panes)) return UNREADABLE;
 
+  // Only this workspace's panes are candidates. With no answer about which
+  // workspace that is, every pane stays a candidate -- the answer the rail
+  // gave for months, and a board from the wrong space beats no rail at all in
+  // a case that needs a session with no focused pane AND no focused workspace
+  // to reach.
+  const workspace = focusedWorkspace(panes, bin);
+  const candidates = workspace
+    ? panes.filter((pane) => pane?.workspace_id === workspace)
+    : panes;
+
   const me = process.env.HERDR_PANE_ID ?? "";
   let best = null;
   let bestScore = -1;
-  for (const pane of panes) {
+  for (const pane of candidates) {
     if (pane?.pane_id === me) continue;
     // Where the shell went beats where it was launched, but only while it is
     // still on a board: a pane that cd'd out to /tmp should not blank a rail
@@ -199,6 +262,26 @@ function boardCwd() {
   return bestScore >= 4 ? best : null;
 }
 
+// What makes a `.beads` directory a BOARD rather than just a directory with
+// that name. `config.yaml` and `metadata.json` are what `bd init` writes;
+// `issues.jsonl` is the export it keeps beside them on a board that has been
+// used. Any one of them is enough, and a `.beads` with none of them is not a
+// board this walk should stop at.
+//
+// It has to be asked because bd keeps MACHINE state in `~/.beads` -- a
+// machine-id, a shared-server socket, an event log -- and a name test alone
+// then answers yes for every directory under $HOME. That is not hypothetical:
+// on a box with that directory every pane looked like it was on a board, so
+// the rail ran `bd list` where bd itself says "no beads database found", which
+// is the failure that keeps the LAST board on screen. A rail scoped to the
+// focused workspace would have gone on showing another workspace's beads,
+// which is precisely the thing the scoping is for.
+const BOARD_MARKERS = ["config.yaml", "metadata.json", "issues.jsonl"];
+
+function isBoard(beadsDir) {
+  return BOARD_MARKERS.some((name) => existsSync(`${beadsDir}/${name}`));
+}
+
 // Walks up, the way bd itself finds a board and git finds `.git`. Testing only
 // the directory handed in would score a pane sitting three levels inside a
 // checkout at zero and blank a rail that bd would have answered from that exact
@@ -206,7 +289,7 @@ function boardCwd() {
 function hasBoard(dir) {
   let at = dir;
   for (;;) {
-    if (existsSync(`${at}/.beads`)) return true;
+    if (isBoard(`${at}/.beads`)) return true;
     const up = dirname(at);
     if (up === at) return false;
     at = up;
@@ -306,11 +389,38 @@ function railLine(bead) {
   return `${statusChar(bead.status)}${priorityChar(bead.priority)} ${text}`;
 }
 
+// The row a rail draws when the board holds nothing it is looking for.
+//
+// A well-formed row of the rail's own format: `-` is the unknown status and
+// `-` the absent priority, so the reader draws it in the dim fallback glyph
+// with no idea it is a sentence, an OLD reader draws it too, and nothing in
+// herdr had to learn a word. See ../../nix/sidebar-beads.rs' header.
+//
+// It exists because in-progress-only makes "nothing to show" the ORDINARY
+// state of a healthy board, and the rail vanishes when it is given no rows:
+// the sidebar would lose a section every time somebody closed their last bead,
+// and the way to the board would go with it. A rail that says nothing is in
+// progress is a rail; a rail that disappears is a bug report.
+//
+// The words come out of the vocabulary rather than a constant, so the setting
+// that decides what the rail shows also decides what it says when there is
+// none of it. Anything but a single status gets the general form -- "nothing
+// blocked, in progress" is not a sentence.
+function emptyLine(allowed) {
+  if (allowed !== null && allowed.length === 1) {
+    return `-- nothing ${allowed[0].replace(/_/g, " ")}`;
+  }
+  return "-- nothing to show";
+}
+
 function main() {
   const cwd = boardCwd();
   if (cwd === UNREADABLE) process.exit(1);
-  // No pane is sitting on a board: an empty rail is the honest answer, and is
-  // how the rail gets out of the way when you move to a repo without one.
+  // No pane in the focused workspace is sitting on a board: an empty rail is
+  // the honest answer, and is how the rail gets out of the way when you move
+  // to a space that has no board to report. This is the ONE empty that writes
+  // no rail at all -- a workspace with a board always gets one, even with
+  // nothing on it, because there the rail has something to say.
   if (!cwd) return;
 
   const allowed = configuredStatuses();
@@ -323,7 +433,6 @@ function main() {
   // could not answer" -- absent, erroring, mid-migration -- where an empty
   // rail is a lie, so fail and let bin/sync keep the last board it had.
   if (beads === null) process.exit(1);
-  if (beads.length === 0) return;
 
   // Two ceilings, and they mean different things.
   //
@@ -363,9 +472,11 @@ function main() {
     .filter((line) => line !== null)
     .slice(0, cap);
 
-  if (lines.length > 0) {
-    process.stdout.write(`${totalsLine(showing)}\n${lines.join("\n")}\n`);
-  }
+  // The totals line always goes out, rows or no rows: it is what the summary
+  // counts, and on a board with nothing in progress it is what says the counts
+  // are zeroes rather than unknown.
+  const body = lines.length > 0 ? lines.join("\n") : emptyLine(allowed);
+  process.stdout.write(`${totalsLine(showing)}\n${body}\n`);
 }
 
 main();

@@ -390,7 +390,11 @@ in
 
         - `HERDR_DRIP_BEADS_ROWS` — rows the rail draws (default 5);
         - `HERDR_DRIP_BEADS_STATUSES` — comma-separated status vocabulary: an
-          order for the board, a filter for the rail;
+          order for the board, a filter for the rail. The rail's default is
+          `in_progress` alone — five rows answer "what am I in the middle of"
+          and nothing else — and `all` is the word for the whole board, which
+          an allowlist cannot spell because a board may carry a status the
+          plugin has never heard of;
         - `HERDR_DRIP_BEADS_SHOW_CLOSED` — `1` to include closed beads;
         - `HERDR_DRIP_BEADS_INTERVAL` — seconds between rail refreshes (15);
         - `HERDR_DRIP_BEADS_LIMIT` — outer ceiling on beads written (40);
