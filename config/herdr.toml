@@ -81,8 +81,30 @@ peach = "#FAB387"       # interrupted / warning
 blue = "#89B4FA"        # unseen / done notifications
 teal = "#94E2D5"        # notification accent, unseen markers
 
+# The top row is state, AGE, space, tab — and the age is where `workspace`
+# used to be.
+#
+# `workspace` had to go because drip.agent-scope filters this list to the
+# space you are looking at by default, so the column was one value repeated
+# down the whole list. `$since` (drip.reply-age) is how long since that agent
+# last replied, which is the thing the list is now SORTED by, so the column
+# and the order say the same thing and you can read one against the other.
+#
+# `$space` is the workspace name back again, and it is not a contradiction:
+# it is reported ONLY while the list is showing every space, which is the one
+# mode where the name is not redundant — it is then the only thing telling two
+# repos' agents apart. It cannot be a config row that swaps with the scope
+# (rows are config, the scope is a view, and nothing in herdr changes rows at
+# runtime), but it does not have to be: a missing custom token is dropped from
+# its row and a row left with nothing in it is dropped whole, so one token
+# that is sometimes absent IS a column that comes and goes.
+#
+# `$worktree` does not cover this. worktree-tokens reports nothing for a main
+# checkout on purpose, so on a host whose agents are mostly in main checkouts
+# — this one, right now — that row is absent from every entry and carries no
+# repo identity at all.
 [ui.sidebar.agents.rows_by_agent]
-claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"], ["$worktree"]]
+claude = [["state_icon", "$since", "$space", "tab"], ["terminal_title_stripped"], ["$worktree"]]
 
 [terminal]
 # New panes boot straight into a yolo claude; exit drops to zsh. The name is
