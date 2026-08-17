@@ -102,6 +102,14 @@ let
   # manifest at EVAL time, so a typo in `plugins` fails the build here rather
   # than failing at activation on every host, and the id stays authoritative
   # if the drip.<dir> convention ever changes.
+  # What `plugins` asks for, less what a workflow toggle took away. Subtraction
+  # rather than a rewritten list so that the two surfaces compose: a host states
+  # the plugins it wants explicitly, `services.herdr-drip.workflows.<x>.enable
+  # = false` removes the ones that workflow owns, and neither has to know what
+  # the other said. A `mkForce`d list from the workflows module would instead
+  # discard the host's choice about the other seven.
+  effectivePlugins = lib.subtractLists cfg.disabledPlugins cfg.plugins;
+
   repoPlugins = map (name: {
     inherit name;
     id = (builtins.fromTOML (builtins.readFile (../. + "/${name}/herdr-plugin.toml"))).id;
@@ -109,7 +117,7 @@ let
       runtimeInputs = pluginRuntimeInputs name;
       runtimeEnv = pluginRuntimeEnv name;
     } name;
-  }) cfg.plugins;
+  }) effectivePlugins;
 
   # `extraPlugins` states its ids rather than reading them, because the whole
   # point of that option is plugins this repo does not contain: reading the
@@ -338,6 +346,23 @@ in
         Removing a name does NOT unlink it — the module never touches
         plugins outside this list. Set to `[ ]` to provision none of them
         and leave the user to `herdr plugin install` whatever they want.
+      '';
+    };
+
+    disabledPlugins = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      internal = true;
+      description = ''
+        Names subtracted from `plugins` before anything is built or linked.
+        Written by nix/workflows.nix when a workflow that owns a plugin is
+        disabled, and not intended as a host-facing knob — a host that does
+        not want a plugin leaves it out of `plugins`, and a host that does
+        not want a whole way of working turns off the workflow.
+
+        Internal because the two would otherwise be a puzzle: `plugins` says
+        what you get and this says what you do not, and only one of them
+        should be the thing you reach for.
       '';
     };
 

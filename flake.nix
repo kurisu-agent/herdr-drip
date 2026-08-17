@@ -251,11 +251,20 @@
             args // { beadsDefault = beads.packages.${pkgs.stdenv.hostPlatform.system}.default; }
           );
 
-        # The standard procedure: both halves.
+        # Ways of working — each gating its CLAUDE.md guidance and its
+        # installs together, so a host turns beads (or a habit that installs
+        # nothing) on and off in one place instead of three. Renders prose
+        # into `services.herdr-drip.workflowGuidance` for the host to feed
+        # its context file; see nix/workflows.nix for why it is a pull.
+        # Every workflow defaults OFF.
+        workflows = import ./nix/workflows.nix;
+
+        # The standard procedure: all three halves.
         default = {
           imports = [
             claude-agent-state
             plugins
+            workflows
           ];
         };
       };
