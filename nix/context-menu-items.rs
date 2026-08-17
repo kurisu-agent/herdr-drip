@@ -22,10 +22,17 @@
 /// the whole difference between a separator and a dead menu entry.
 pub(crate) const DRIP_MENU_SEPARATOR: &str = "─";
 
-// The pane menu, in the order it is drawn. Two creations, then the things that
-// rearrange what already exists, then the four ways to split, then the way out.
+// The pane menu, in the order it is drawn. Three creations, then the things
+// that rearrange what already exists, then the four ways to split, then the way
+// out.
+//
+// `New Agent` sits under `New Space` because it IS a new space, with its cwd
+// and its pane's kind pinned rather than inherited — see
+// nix/pane-menu-new-agent.rs. Third rather than first: the two above it are
+// where you go to work, and this is the one you take a thought to.
 pub(crate) const DRIP_NEW_TAB: &str = "New Tab";
 pub(crate) const DRIP_NEW_SPACE: &str = "New Space";
+pub(crate) const DRIP_NEW_AGENT: &str = "New Agent";
 pub(crate) const DRIP_AGENT_RIGHT: &str = "Agent Right";
 pub(crate) const DRIP_AGENT_DOWN: &str = "Agent Down";
 pub(crate) const DRIP_SHELL_RIGHT: &str = "Shell Right";
@@ -50,7 +57,13 @@ pub(crate) const DRIP_PASSTHROUGH_EXIT: &str = "Use Herdr right-click menu";
 pub(crate) fn drip_pane_menu(stock: Vec<&'static str>) -> Vec<&'static str> {
     let offered = |item: &str| stock.iter().any(|candidate| *candidate == item);
 
-    let mut items = vec![DRIP_NEW_TAB, DRIP_NEW_SPACE, DRIP_MENU_SEPARATOR, DRIP_ZOOM];
+    let mut items = vec![
+        DRIP_NEW_TAB,
+        DRIP_NEW_SPACE,
+        DRIP_NEW_AGENT,
+        DRIP_MENU_SEPARATOR,
+        DRIP_ZOOM,
+    ];
     if offered(DRIP_SWAP) {
         items.push(DRIP_SWAP);
     }
@@ -90,6 +103,7 @@ pub(crate) fn drip_menu_glyph(item: &str) -> Option<&'static str> {
     Some(match item {
         DRIP_NEW_TAB | "New tab" => "\u{eb23}",       // cod-multiple_windows
         DRIP_NEW_SPACE => "\u{eb7f}",                 // cod-window
+        DRIP_NEW_AGENT => "\u{eb08}",                 // cod-hubot
         DRIP_ZOOM => "\u{eb4c}",                      // cod-screen_full
         DRIP_SWAP => "\u{ebcb}",                      // cod-arrow_swap
         DRIP_AGENT_RIGHT | DRIP_SHELL_RIGHT => "\u{eb56}", // cod-split_horizontal

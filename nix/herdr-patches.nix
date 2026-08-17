@@ -320,6 +320,7 @@ herdrPkg.overrideAttrs (old: {
     #
     #     New Tab
     #     New Space
+    #     New Agent
     #     ─────────────────────────────────────────
     #     Zoom
     #     ─────────────────────────────────────────
@@ -343,6 +344,12 @@ herdrPkg.overrideAttrs (old: {
     #     a trip to the sidebar for the two things you most often want next to
     #     the pane you are looking at. They reuse herdr's own entry points, so
     #     they inherit its name prompts and, through shell-panes, open shells.
+    #     `New Agent` is the third and the only one with no stock entry point:
+    #     a space at $HOME whose pane is an agent rather than a shell, for the
+    #     thought that has nothing to do with the repo in front of you. Both
+    #     halves of that are pins on what `New Space` inherits — the cwd, and
+    #     the one variable shell-panes would otherwise set. See
+    #     nix/pane-menu-new-agent.rs.
     #   - THE SEPARATORS. Three groups: what makes something new, what
     #     rearranges what exists, and what splits. A separator is an item like
     #     any other in a `Vec<&'static str>`, so it has to be made
@@ -376,6 +383,7 @@ herdrPkg.overrideAttrs (old: {
     cat ${./context-menu-items.rs} >> src/app/state.rs
     cat ${./context-menu-render.rs} >> src/ui/menus.rs
     cat ${./pane-menu-splits.rs} >> src/app/input/modal.rs
+    cat ${./pane-menu-new-agent.rs} >> src/app/input/modal.rs
 
     # The whole list, in our order, built from the one stock just finished
     # assembling — so which CONDITIONAL rows exist stays herdr's decision (a
@@ -385,15 +393,23 @@ herdrPkg.overrideAttrs (old: {
     substituteInPlace src/app/state.rs \
       --replace-fail '                items.push("Close pane");' '                items.push("Close pane"); let items = drip_pane_menu(items);'
 
-    # Two arms of our own, injected at the head of the live dispatcher, where
+    # Three arms of our own, injected at the head of the live dispatcher, where
     # `match (menu.kind, item) {` sits at 8 spaces (the #[cfg(test)] copy has
     # it at 4). They set no trailing mode of their own: open_new_tab_dialog
     # always moves to the tab-name prompt, while begin_tui_workspace_create
     # only prompts when `prompt_new_workspace_name` is set and otherwise
     # creates silently — leaving the mode on ContextMenu for a menu that has
     # already been taken. Hence the leave_modal for exactly that case.
+    #
+    # `New Agent` carries the same guard for a narrower reason: it always
+    # creates, and creating with focus leaves the mode on Terminal, so the
+    # guard is only reached when the create FAILED — and a dispatcher that has
+    # taken the menu out of state must not leave the mode pointing at it. It is
+    # also the one arm that reads nothing off the clicked pane, hence `{ .. }`
+    # and no focus call: its cwd is pinned to $HOME, not inherited from the
+    # click, and the new space takes the focus itself.
     substituteInPlace src/app/input/modal.rs \
-      --replace-fail '        match (menu.kind, item) {' '        match (menu.kind, item) { (ContextMenuKind::Pane { ws_idx, pane_id, .. }, Some(crate::app::state::DRIP_NEW_TAB)) => { self.focus_pane_internal_via_api(ws_idx, pane_id); open_new_tab_dialog(&mut self.state); } (ContextMenuKind::Pane { ws_idx, pane_id, .. }, Some(crate::app::state::DRIP_NEW_SPACE)) => { self.focus_pane_internal_via_api(ws_idx, pane_id); self.begin_tui_workspace_create("tui.menu.workspace.create"); if self.state.mode == Mode::ContextMenu { leave_modal(&mut self.state); } }'
+      --replace-fail '        match (menu.kind, item) {' '        match (menu.kind, item) { (ContextMenuKind::Pane { ws_idx, pane_id, .. }, Some(crate::app::state::DRIP_NEW_TAB)) => { self.focus_pane_internal_via_api(ws_idx, pane_id); open_new_tab_dialog(&mut self.state); } (ContextMenuKind::Pane { ws_idx, pane_id, .. }, Some(crate::app::state::DRIP_NEW_SPACE)) => { self.focus_pane_internal_via_api(ws_idx, pane_id); self.begin_tui_workspace_create("tui.menu.workspace.create"); if self.state.mode == Mode::ContextMenu { leave_modal(&mut self.state); } } (ContextMenuKind::Pane { .. }, Some(crate::app::state::DRIP_NEW_AGENT)) => { self.drip_new_agent_workspace(); if self.state.mode == Mode::ContextMenu { leave_modal(&mut self.state); } }'
 
     substituteInPlace src/app/input/modal.rs \
       --replace-fail '                Some("Split right"),' '                Some(crate::app::state::DRIP_AGENT_RIGHT | crate::app::state::DRIP_SHELL_RIGHT),'

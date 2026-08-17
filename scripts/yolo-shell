@@ -69,16 +69,21 @@ mark() {
   return 0
 }
 
-# A pane herdr spawned as a terminal rather than an agent. The drip's herdr
-# patches set this in the pane's launch env for every new workspace, every new
-# tab, every worktree it opens, and the pane menu's two `(shell)` splits --
-# the gestures that mean "somewhere to work", as opposed to a split, which is
-# how you ask for another agent. Deciding here rather than in the patch is the
-# point: herdr sets one variable and knows nothing about what a shell is, so
-# the same patched herdr on a host with an ordinary default_shell inherits one
-# unused variable and behaves as stock.
+# What kind of pane herdr says this is. The drip's herdr patches set `shell`
+# in the launch env for every new workspace, every new tab, every worktree it
+# opens, and the pane menu's two `Shell` splits -- the gestures that mean
+# "somewhere to work", as opposed to a split, which is how you ask for another
+# agent. The pane menu's `New Agent` sets `agent`, for the opposite reason:
+# that gesture creates a workspace, and a workspace is what the shell default
+# above is attached to, so it has to say so to get an agent. Deciding here
+# rather than in the patch is the point: herdr sets one variable and knows
+# nothing about what a shell is, so the same patched herdr on a host with an
+# ordinary default_shell inherits one unused variable and behaves as stock.
 #
-# Taken BEFORE the stdin peek below, not folded into its condition: the peek
+# Only `shell` is tested, so any other value -- `agent`, or one a future patch
+# invents -- takes the agent path below, which is also what NO value does.
+#
+# Read BEFORE the stdin peek below, not folded into its condition: the peek
 # spends 0.5s waiting for a resume line that cannot arrive here, since herdr
 # only injects one for a pane that had an agent session and this pane was born
 # a moment ago. That wait would land on every new workspace.
@@ -86,11 +91,13 @@ mark() {
 # It is a spawn-time flag with no life after this: herdr persists no launch
 # env, so a restored pane arrives without it. `mark shell` is what carries the
 # fact across a server restart -- the same record that remembers a pane you
-# dropped out of claude by hand. Unset so the pane's own environment does not
-# hand a herdr-internal marker to everything the user runs in it.
-if [[ ${HERDR_DRIP_PANE_KIND:-} == shell ]]; then
+# dropped out of claude by hand. Unset unconditionally, whichever kind it named,
+# so the pane's own environment does not hand a herdr-internal marker to
+# everything the user runs in it.
+kind=${HERDR_DRIP_PANE_KIND:-}
+unset HERDR_DRIP_PANE_KIND
+if [[ $kind == shell ]]; then
   mark shell
-  unset HERDR_DRIP_PANE_KIND
   exec zsh -i
 fi
 

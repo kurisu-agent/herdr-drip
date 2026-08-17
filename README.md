@@ -882,11 +882,11 @@ same way the plugin directories curate everything else. Current set:
 - **shell-panes** — a new workspace or tab opens a terminal, not an agent.
   Splitting is what asks for claude. See below.
 - **pane-menu** — the pane's right-click menu, rewritten: renamed rows in three
-  separated groups, `New Tab` / `New Space` added, a shell and an agent split
-  each way, three rows dropped, and a right-aligned icon column across every
-  context menu. A plugin's `[[actions]]` reach the palette and the keybindings,
-  never herdr's context menus, whose items are a `&'static str` list compiled
-  into the binary. See below.
+  separated groups, `New Tab` / `New Space` / `New Agent` added, a shell and an
+  agent split each way, three rows dropped, and a right-aligned icon column
+  across every context menu. A plugin's `[[actions]]` reach the palette and the
+  keybindings, never herdr's context menus, whose items are a `&'static str`
+  list compiled into the binary. See below.
 - **single-pane-borders** — a lone pane keeps its frame. Not the
   `ui.pane_borders` setting, which is already on: herdr ANDs it with a
   hardcoded `pane_count() > 1`. See below.
@@ -1020,6 +1020,7 @@ The split is by gesture, not by pane:
 | `New worktree`, `Open worktree...`, and the workspace herdr seeds at startup | shell |
 | `Agent Right` / `Agent Down`, and `Ctrl+b r`/`d` | claude |
 | `Shell Right` / `Shell Down` (**pane-menu**) | shell |
+| `New Agent` (**pane-menu**) | claude, in a new space at `~` |
 | A session restore | whatever that pane was |
 
 Asking for an agent is now a deliberate two-pane gesture, and the shell you
@@ -1039,6 +1040,12 @@ HERDR_DRIP_PANE_KIND=shell
 launcher. A host whose `default_shell` is a plain shell inherits one unused
 variable and behaves exactly like stock herdr — the same replaceability rule
 `sidebar-accounts` follows.
+
+Only `shell` is tested for, so any other value — `agent`, which is what
+`New Agent` sets to keep this patch off a workspace it is creating on purpose —
+means the same thing as no value at all: the launcher runs. Either way the
+variable is unset before the pane is yours, so nothing you run in it sees a
+herdr-internal marker.
 
 **The API mostly keeps stock behaviour.** Two of the three anchors are
 herdr's *TUI-side* mutations (`tui.workspace.create`, `tui.tab.create` and
@@ -1064,6 +1071,7 @@ each row is called, is **pane-menu** below.
 ```
  New Tab             
  New Space           
+ New Agent           
  ────────────────────
  Zoom                
  ────────────────────
@@ -1087,6 +1095,19 @@ entry points, so they inherit its name prompts (`prompt_new_workspace_name` and
 the tab-name dialog) and, through **shell-panes**, open shells rather than
 agents.
 
+**`New Agent` is a third creation with no stock entry point at all**: a space
+at `~` whose one pane is an agent. It is `New Space` with the two things that
+row inherits pinned instead, and the pinning is the whole reason for a separate
+row — the cwd is `~` rather than wherever the pane you right-clicked is (which
+is what `new_terminal_cwd`'s default means), and the pane is an agent rather
+than the shell **shell-panes** gives every other new workspace. Together those
+are the gesture for a thought that has nothing to do with the repo in front of
+you: somewhere to ask it, immediately, that will not be confused later for work
+in this tree. The space labels itself `~` from herdr's own cwd-derived name, so
+there is no name prompt whatever `prompt_new_workspace_name` says; the
+sidebar's `Rename` is there for the ones that turn into something. It is also
+the one row that reads nothing off the pane you clicked.
+
 **The icons are right-aligned, which is why the labels no longer carry them.**
 herdr draws each row as `Line::from(item)`, so anything a row wants to say has
 to be *in* its string — and a string cannot know how wide the popup will be.
@@ -1099,6 +1120,7 @@ row builder (`nix/context-menu-render.rs`) and a vocabulary
 | --- | --- | --- | --- |
 |  | `U+EB23` | `cod-multiple_windows` | `New Tab` (and the tab menu's `New tab`) |
 |  | `U+EB7F` | `cod-window` | `New Space` |
+|  | `U+EB08` | `cod-hubot` | `New Agent` |
 |  | `U+EB4C` | `cod-screen_full` | `Zoom` |
 |  | `U+EBCB` | `cod-arrow_swap` | `Swap with focused pane` |
 |  | `U+EB56` | `cod-split_horizontal` | `Agent Right`, `Shell Right` |
