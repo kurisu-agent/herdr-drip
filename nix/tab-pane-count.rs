@@ -52,6 +52,14 @@ fn drip_is_private_use(c: char) -> bool {
 /// is treated as an unadorned name, including a name that is nothing BUT a
 /// glyph, which neither source can produce and which has no "after the icon"
 /// for a count to sit in.
+///
+/// THE FAILURE MODE IS BOUNDED, which is what makes a heuristic acceptable on a
+/// string this drip did not write: the caller only ever INSERTS at the offset
+/// this returns and never removes, reorders or re-encodes a byte of the name.
+/// So a name this reads wrongly is a name with the count in the less good
+/// position -- never a mangled one. If some source ever produces a name where
+/// that position reads badly, the whole heuristic can be deleted for a plain
+/// prefix (`format!("·{count} {name}")`) without touching anything else here.
 fn drip_tab_name_icon_split(name: &str) -> Option<(&str, &str)> {
     let mut chars = name.char_indices();
     let (_, icon) = chars.next()?;

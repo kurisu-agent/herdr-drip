@@ -1157,6 +1157,14 @@ preset (`<icon> implementation`) or a plugin's manifest pane title
 tab-number fallback — puts the count in front instead, which is the same rule:
 count, then name.
 
+The glyph test is a heuristic (a private-use codepoint followed by a space),
+and it is allowed to be one because the splice only ever *inserts*: nothing
+removes, reorders or re-encodes a byte of the name, so a name it reads wrongly
+gets the count in the less good position rather than mangled. If a name source
+ever turns up that it reads badly, the fix is to delete the heuristic and put
+the count in front of everything — one `format!`, nothing else in the patch
+changes.
+
 `·` (U+00B7) and not a bare number, because the fallback name for an unnamed
 tab *is* a number and `2 3` is a label that says nothing twice; not `×`, which
 in a tab bar is the close button in every GUI there is, and herdr's tab cells
