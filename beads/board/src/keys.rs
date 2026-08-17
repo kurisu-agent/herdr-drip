@@ -1,6 +1,6 @@
 //! Key and mouse dispatch. Keeps the keymap in one place; App holds the logic.
 
-use crate::app::App;
+use crate::app::{App, Drag};
 use crate::input::InputKind;
 use crate::model::View;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
@@ -15,6 +15,12 @@ pub fn help_lines() -> Vec<(&'static str, &'static str)> {
         ("[ ]", "jump to prev / next status group"),
         ("Enter", "open detail"),
         ("d", "toggle detail pane / modal"),
+        ("< >  , .", "detail: narrower / wider (or drag the divider)"),
+        ("=", "detail: back to the default width"),
+        (
+            "PgUp/PgDn",
+            "detail: scroll the description (wheel works too)",
+        ),
         ("v", "move mode: then h/l retags status"),
         ("c", "claim (in_progress + assign you)"),
         ("x", "close (prompts for reason)"),
@@ -47,14 +53,49 @@ fn hit(r: &Rect, col: u16, row: u16) -> bool {
         && row < r.y.saturating_add(r.height)
 }
 
+/// Which resize handle, if any, is under the pointer. The divider is one column
+/// wide, so it is grabbable one column either side as well — a 1px target is a
+/// target you miss.
+fn grab_target(app: &App, col: u16, row: u16) -> Option<Drag> {
+    if let Some(d) = app.hits.divider {
+        let wide = Rect::new(d.x.saturating_sub(1), d.y, d.width + 2, d.height);
+        if hit(&wide, col, row) {
+            return Some(Drag::Divider);
+        }
+    }
+    if let Some(m) = app.hits.modal {
+        if row >= m.y && row < m.y.saturating_add(m.height) {
+            let right = m.x.saturating_add(m.width).saturating_sub(1);
+            if col.abs_diff(m.x) <= 1 {
+                return Some(Drag::ModalLeft);
+            }
+            if col.abs_diff(right) <= 1 {
+                return Some(Drag::ModalRight);
+            }
+        }
+    }
+    None
+}
+
 pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
     match ev.kind {
         MouseEventKind::Down(MouseButton::Left) => {
+            // DRIP ADDITION: a resize handle takes the press before anything
+            // else, and the press itself starts the drag.
+            if let Some(t) = grab_target(app, ev.column, ev.row) {
+                app.drag = Some(t);
+                return;
+            }
             for (v, r) in app.hits.tabs.clone() {
                 if hit(&r, ev.column, ev.row) {
                     app.set_view(v);
                     return;
                 }
+            }
+            // A click inside the modal is a click on the modal, not on the row
+            // it happens to be covering.
+            if app.hits.modal.is_some_and(|m| hit(&m, ev.column, ev.row)) {
+                return;
             }
             for (id, r) in app.hits.rows.clone() {
                 if hit(&r, ev.column, ev.row) {
@@ -63,10 +104,30 @@ pub fn handle_mouse(app: &mut App, ev: MouseEvent) {
                 }
             }
         }
-        MouseEventKind::ScrollDown => app.nav_vert(1),
-        MouseEventKind::ScrollUp => app.nav_vert(-1),
+        MouseEventKind::Drag(MouseButton::Left) => app.drag_to(ev.column),
+        MouseEventKind::Up(MouseButton::Left) => app.drag = None,
+        // The wheel scrolls whatever is under it: the description if the
+        // pointer is over the detail, the selection otherwise.
+        MouseEventKind::ScrollDown => {
+            if over_detail(app, ev.column, ev.row) {
+                app.scroll_detail(3);
+            } else {
+                app.nav_vert(1);
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if over_detail(app, ev.column, ev.row) {
+                app.scroll_detail(-3);
+            } else {
+                app.nav_vert(-1);
+            }
+        }
         _ => {}
     }
+}
+
+fn over_detail(app: &App, col: u16, row: u16) -> bool {
+    app.hits.detail.is_some_and(|r| hit(&r, col, row))
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
@@ -170,6 +231,26 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 
         KeyCode::Enter => app.open_detail(),
         KeyCode::Char('d') => app.toggle_detail(),
+        // DRIP ADDITION: the detail split is adjustable. `<`/`>` move it, `=`
+        // puts it back, PgUp/PgDn scroll inside it (and page the list when
+        // there is no detail on screen to scroll).
+        KeyCode::Char('<') | KeyCode::Char(',') => app.resize_detail(-1),
+        KeyCode::Char('>') | KeyCode::Char('.') => app.resize_detail(1),
+        KeyCode::Char('=') => app.reset_detail_size(),
+        KeyCode::PageDown => {
+            if app.detail_on_screen() {
+                app.scroll_detail(10);
+            } else {
+                app.nav_vert(10);
+            }
+        }
+        KeyCode::PageUp => {
+            if app.detail_on_screen() {
+                app.scroll_detail(-10);
+            } else {
+                app.nav_vert(-10);
+            }
+        }
 
         KeyCode::Char('v') => app.move_mode = !app.move_mode,
         KeyCode::Char('c') => app.claim_selected(),

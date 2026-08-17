@@ -25,12 +25,24 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let body = rows[1];
     let want_detail = app.show_detail && app.view != View::Kanban;
     if want_detail && body.width > 70 {
-        // wide: detail beside the list
-        let detail_w = (body.width / 3).clamp(30, 52);
-        let cols =
-            Layout::horizontal([Constraint::Min(0), Constraint::Length(detail_w)]).split(body);
+        // wide: detail beside the list, with a grab bar between them.
+        //
+        // DRIP CHANGE: the width was `(body.width / 3).clamp(30, 52)`. It is
+        // now whatever the user last dragged or typed it to (App::detail_width),
+        // and the column that used to be a bare seam between two borders is a
+        // real divider you can put a mouse on.
+        let detail_w = app.detail_width(body.width);
+        let cols = Layout::horizontal([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(detail_w),
+        ])
+        .split(body);
         render_view(f, cols[0], app);
-        views::detail::render_side(f, cols[1], app);
+        app.hits.body = Some(body);
+        app.hits.divider = Some(cols[1]);
+        widgets::render_divider(f, cols[1], app.drag == Some(crate::app::Drag::Divider));
+        views::detail::render_side(f, cols[2], app);
     } else if want_detail {
         // narrow sidebar: float the detail on top of the list (Clear-backed
         // modal) instead of splitting it below, so the full list stays put.

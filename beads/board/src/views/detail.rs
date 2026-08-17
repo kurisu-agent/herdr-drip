@@ -2,6 +2,7 @@
 
 use crate::app::App;
 use crate::bd::types::Bead;
+use crate::markdown;
 use crate::model::{status_glyph, status_label};
 use crate::ui::theme;
 use crate::ui::widgets::centered_rect;
@@ -54,10 +55,12 @@ pub fn build_lines(b: &Bead) -> Vec<Line<'static>> {
             "Description",
             Style::default().fg(theme::YELLOW),
         )));
-        lines.push(Line::from(Span::styled(
-            b.description.clone(),
-            Style::default().fg(theme::SUBTEXT),
-        )));
+        // DRIP CHANGE: this was one plain `Span` holding the whole description.
+        // bd descriptions are markdown and this repo's are heavily so, which
+        // meant the pane showed `##` and ``` as literal noise wrapped into a
+        // single paragraph. See `crate::markdown` for the renderer and for what
+        // it does not handle.
+        lines.extend(markdown::render(&b.description));
         lines.push(Line::raw(""));
     }
     if !b.dependencies.is_empty() {
@@ -93,34 +96,71 @@ fn lines_for(app: &App) -> Vec<Line<'static>> {
     }
 }
 
-pub fn render_side(f: &mut Frame, area: Rect, app: &App) {
+/// Draw the detail text into `inner`, scrolled, and record what the scroll
+/// keys need to know: how tall the content came out and how much of it fits.
+///
+/// DRIP ADDITION. Upstream drew the whole `Text` into the block and let ratatui
+/// drop whatever fell off the bottom, which was survivable when a description
+/// was one wrapped paragraph. Rendered as markdown, and against boards whose
+/// descriptions run to thousands of lines, everything past the first screen was
+/// simply unreachable.
+fn render_text(f: &mut Frame, block: Block<'static>, rect: Rect, app: &mut App) {
+    let lines = lines_for(app);
+    let inner = block.inner(rect);
+    app.detail_content_h = markdown::wrapped_height(&lines, inner.width);
+    app.detail_view_h = inner.height as usize;
+    app.hits.detail = Some(rect);
+    // The content may have shrunk since the offset was set (a smaller bead, a
+    // wider pane), so re-clamp rather than trusting the stored value.
+    let scroll = app.detail_scroll.min(app.detail_max_scroll());
+    app.detail_scroll = scroll;
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0))
+            // Unstyled markdown text inherits the pane's own foreground; spans
+            // that carry a colour (headings, code, syntect) still win.
+            .style(Style::default().fg(theme::SUBTEXT).bg(Color::Reset)),
+        rect,
+    );
+}
+
+/// `12%` when there is more below, so a truncated description does not look
+/// like the whole of one.
+fn scroll_title(app: &App) -> String {
+    let max = app.detail_max_scroll();
+    if max == 0 {
+        String::new()
+    } else {
+        let pct = (app.detail_scroll as u32 * 100 / max as u32).min(100);
+        format!("{pct}% ")
+    }
+}
+
+pub fn render_side(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme::SURFACE2))
-        .title(" Detail ")
+        .title(format!(" Detail {}", scroll_title(app)))
         .style(Style::default().bg(Color::Reset));
-    f.render_widget(
-        Paragraph::new(lines_for(app))
-            .block(block)
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+    render_text(f, block, area, app);
 }
 
-pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
-    let rect = centered_rect(70, 80, area);
+pub fn render_modal(f: &mut Frame, area: Rect, app: &mut App) {
+    let rect = centered_rect(app.modal_pct, 80, area);
+    app.hits.modal = Some(rect);
+    app.hits.modal_area = Some(area);
     f.render_widget(Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme::MAUVE))
-        .title(" Detail - Esc to close ")
+        .title(format!(
+            " Detail {}- < > resize · PgUp/PgDn scroll · Esc to close ",
+            scroll_title(app)
+        ))
         .style(Style::default().bg(Color::Reset));
-    f.render_widget(
-        Paragraph::new(lines_for(app))
-            .block(block)
-            .wrap(Wrap { trim: false }),
-        rect,
-    );
+    render_text(f, block, rect, app);
 }
