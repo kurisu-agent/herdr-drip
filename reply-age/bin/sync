@@ -17,6 +17,12 @@
 # ours to keep -- in $HERDR_PLUGIN_STATE_DIR, so that restarting the watcher
 # does not reset every row to "just now".
 #
+# Which also fixes the accuracy: a stamp is `now` at TICK time, not at
+# transition time, so an age reads up to one interval younger than it is.
+# There is nothing to recover it from -- the transition left no timestamp
+# behind either -- and it stops mattering the moment the row reads in
+# minutes, which is why the interval is the only dial on it.
+#
 # Three tokens per agent pane:
 #   $since      human, narrow: `now`, `12s`, `3m`, `1h20m`, `2d`
 #   $since_key  the same elapsed seconds, ZERO-PADDED, for the sort

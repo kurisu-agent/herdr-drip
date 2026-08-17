@@ -1555,6 +1555,12 @@ every row to "just now", and it is keyed by **terminal id, not pane id**: a
 pane id is a slot herdr reuses, and keying on the slot would hand a brand new
 agent the dead one's reply time.
 
+A stamp is `now` at **tick** time rather than at transition time, so an age
+reads up to one interval younger than it truly is. Nothing can recover the
+difference — the transition left no timestamp behind either — and it stops
+mattering as soon as the row reads in minutes, which is why the interval is
+the only dial on it.
+
 An agent seen for the first time is stamped `now`, and that is a guess — the
 honest kind. There is nothing to ask, and on a cold start *every* pane gets
 the same stamp, so they tie and the list keeps herdr's own order rather than
