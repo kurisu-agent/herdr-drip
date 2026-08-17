@@ -787,9 +787,29 @@ changing a setting for an afternoon.
 ### The board itself
 
 Ctrl+b **B** docks it on the left of the current tab; Ctrl+b **O** opens it as
-a whole tab. Both toggle — press again and the pane you opened is closed. The
-dock lands at about a quarter of the tab in List view; the tab opens in Kanban
-with the detail pane up.
+a whole tab. The dock lands at about a quarter of the tab in List view; the tab
+opens in Kanban with the detail pane up.
+
+**Both keys toggle, and neither is the same toggle**, because the two
+entrypoints differ in whether you can *see* what the key would act on from
+where you pressed it. The **tab** board is a whole tab, so from anywhere else
+it is invisible: pressing the key there *focuses* the board you already have
+rather than opening a second, and pressing it on the board closes it. The
+**dock** is furniture in one tab and every pane in that tab is looking at it, so
+one press still closes it — but only the dock in *your* tab. A dock in another
+tab is not on your screen either, and closing it from here was a keypress with
+no visible effect and a board thrown away, so that one is left alone and your
+tab gets its own. A space that has somehow collected two tab boards loses both
+to the press that dismisses them.
+
+And a **beads tab holding something else** gets the board back *in that tab*
+instead of a third one beside it — the case a restore used to leave behind (see
+`plugin-panes-survive-restore` below). The board opens as a split and the pane
+that was there is left alone: what is in it may be a claude somebody is using,
+and `pane list` offers `agent`, `agent_status` and `label` but no plugin
+ownership, so "restore artefact" and "the agent I asked a question ten minutes
+ago" are not distinguishable. Nothing a keypress does here closes a pane it did
+not open.
 
 ```
  List   Table   Kanban    scope:repo
@@ -814,8 +834,8 @@ decides — so what an entrypoint really fixes is its `--mode`, the board's own
 idea of how much room it has. `--mode` understands `dock` and nothing else,
 which is why the *tab* entrypoint asks for `popup` and is not a typo.
 
-**Which repo's board** it opens is the question the rail answers every 15
-seconds, answered once at startup instead: the launcher passes the focused
+**Which repo's board** it opens is the question the rail answers on every focus
+change, answered once at startup instead: the launcher passes the focused
 pane's directory as `HERDR_DRIP_BEADS_CWD`, and the binary re-derives it from
 `herdr pane list` anyway — walking up for `.beads` the way `bd` does, and
 resolving to *nothing* rather than to the best of a bad lot when no pane is on
@@ -898,6 +918,21 @@ same way the plugin directories curate everything else. Current set:
   each behind a glyph, each applied by one click. A plugin's `[[actions]]` reach
   the palette and the keybindings; a `Mode`'s modal is compiled in and has no
   list to contribute a row to. See below.
+- **plugin-panes-survive-restore** — a pane launched from a *command* comes back
+  as that command after `herdr server stop` + `herdr`, instead of as the default
+  shell. herdr already saves the argv (`PaneSnapshot.launch_argv`, plugin panes
+  included) and then only honours it on the fd-handoff path, so a cold start
+  spawned `default_shell` — which here is yolo-shell, so the beads tab came back
+  holding a **fresh claude** under the board's own label. Panes with a saved
+  agent session are untouched (herdr's resume path handles those earlier and
+  never reaches this), and no `respawn_shell_on_exit` rides along: that would
+  make `q` on the board summon the claude this removes. The argv is recorded
+  absolute at open time, because a manifest command is relative to the plugin
+  root while a saved cwd is where the process actually was. Restore cannot give
+  the pane its plugin *environment* back — `state.plugin_panes` is not in the
+  snapshot either — so a restored board resolves its repo from its cwd, titles
+  itself from its `--mode`, and is focused by its tab rather than by
+  `plugin pane focus`; `beads/bin/open.js` knows all three.
 
 They apply as one function, so every host gets the identical set:
 

@@ -1029,5 +1029,105 @@ herdrPkg.overrideAttrs (old: {
     # the rail has grown one.
     substituteInPlace src/app/input/mouse.rs \
       --replace-fail '                    if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {' '                    if self.drip_beads_click_at(mouse.column, mouse.row) { return None; } if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {'
+
+    # plugin-panes-survive-restore: a pane launched from a COMMAND comes back as
+    # that command, not as the default shell.
+    #
+    # THE SYMPTOM was a fresh claude in the tab labelled `beads` after `herdr
+    # server stop` + `herdr`. The label is saved, the process is not — and on
+    # this box `default_shell = "yolo-shell"`, so what a restored pane gets is
+    # not a shell you can ignore: it is an agent session, in a tab named after a
+    # board, indistinguishable from the board at a glance.
+    #
+    # herdr already SAVES what it needs. `PaneSnapshot.launch_argv` is filled
+    # from `terminal.launch_argv` for every argv-launched pane, plugin panes
+    # included — this box's live session.json, before any of this:
+    #     {"label":" beads","cwd":"/home/dev/Code/drift-rust",
+    #      "argv":["./board/target/release/herdr-beads","--mode","popup"]}
+    # What it does not do is USE it. restore.rs reads `saved_launch_argv` and
+    # then applies it only `if was_imported` — the fd-handoff path, where the
+    # process outlived the restart and the argv is being recorded so a later
+    # EXIT can respawn. A cold start imports nothing, so every pane is spawned
+    # from `shell_config` and the saved argv is dropped on the floor.
+    #
+    # No plugin surface reaches this. Restore runs before any plugin does,
+    # `[[events]]` has no restore event, and the only move available from
+    # outside is for a plugin to notice a beads-labelled pane holding a shell
+    # and replace it — a plugin killing a pane that might be somebody's agent,
+    # to repair a snapshot that already contains the right answer.
+    #
+    # WHAT IT DOES NOT TOUCH, which is most of it. A pane with a saved agent
+    # session never reaches this code: `pending_native_agent_restore` handles it
+    # thirty lines earlier and `continue`s, so herdr's own agent resume is
+    # untouched. Imported panes keep the handoff path. What is left is exactly
+    # the panes somebody launched a command in — plugin panes, and a
+    # `pane split -- <cmd>` — and for those, coming back as that command is
+    # what `launch_argv` has always meant.
+    #
+    # THE ARGV IS MADE ABSOLUTE at open time, because a relative one cannot
+    # survive. A manifest command is relative to the plugin root
+    # (`./board/target/release/herdr-beads`, and the `./` is load-bearing:
+    # portable_pty only treats a program as a path when it contains a `/`),
+    # while a pane's saved cwd is where the process ACTUALLY WAS — for the board,
+    # the repo it chdir'd into. Relaunching `./board/...` from the repo finds
+    # nothing. Rewriting it against the plugin root also keeps the nix wrapper
+    # in the loop: the store path recorded IS the wrapped binary, so a restored
+    # board still has `bd` on its PATH and its beadsSettings in its environment.
+    #
+    # NOT `--cwd` on the open, which is the other way to make the saved cwd
+    # honest: `plugin pane open --cwd` sets the directory the manifest's
+    # RELATIVE command is resolved against, so it would break the pane it was
+    # meant to repair. The cwd is already right for a different reason — the
+    # board chdir's into the repo it resolves, and the snapshot records where the
+    # process is.
+    #
+    # NO `with_respawn_shell_on_exit`, which restore pairs with the argv on the
+    # imported path. There it means "this process outlived a restart; when it
+    # does exit, leave a shell behind". Here it would mean the board exiting and
+    # a shell taking its place — and this drip's shell is a claude, so `q` on the
+    # board would summon the exact thing this patch removes. The board closes
+    # its own pane on `q` (beads/board/src/main.rs) and herdr's default for a
+    # pane whose process exits is that same close, so the ABSENCE of the flag is
+    # the wanted behaviour in both directions.
+    #
+    # The relaunch is skipped when an absolute program is not on disk, and that
+    # guard is not decoration: with last-close-quits above, a pane that exits
+    # instantly is a pane that closes, so a board whose store path has been
+    # collected could otherwise close the last pane of a session on every start
+    # — a herdr that quits as soon as it opens. Missing binary, stock behaviour.
+    #
+    # WHAT A RESTORED PLUGIN PANE STILL LACKS is its plugin ENVIRONMENT:
+    # `state.plugin_panes` is not in the snapshot either, so herdr no longer
+    # knows the pane belongs to a plugin, and HERDR_PLUGIN_ID / _ROOT /
+    # _ENTRYPOINT_ID / _CONFIG_DIR are not re-injected. The consequences are all
+    # survivable and none of them is a claude: the board resolves its repo from
+    # its own cwd, which the snapshot got right; it reads no config.json, so its
+    # vocabulary comes from the wrapper's environment defaults; its OSC title
+    # falls back to the mode-derived name (`herdr-beads-board`, not
+    # `herdr-beads-tab`), which is why beads/bin/open.js matches that marker
+    # loosely; and `herdr plugin pane focus` refuses it, which the same script
+    # handles by focusing its tab instead. HERDR_SOCKET_PATH and HERDR_BIN_PATH
+    # are NOT lost — every pane gets those (`apply_pane_base_env`) — so the
+    # board's own `pane close` on `q` still works.
+    substituteInPlace src/app/api/plugins/panes.rs \
+      --replace-fail '        terminal.set_manual_label(pane_manifest.title.clone());' '        terminal.set_manual_label(pane_manifest.title.clone()); if let Some(root) = self.state.installed_plugins.get(&plugin_id).map(|plugin| plugin.plugin_root.clone()) { let mut argv = pane_manifest.command.clone(); if argv.first().is_some_and(|program| program.contains('"'"'/'"'"') && !std::path::Path::new(program).is_absolute()) { argv[0] = std::path::Path::new(&root).join(argv[0].trim_start_matches("./")).display().to_string(); } terminal.launch_argv = Some(argv); }'
+
+    # The spawn. One `if` in front of stock's block, which becomes its `else`
+    # untouched — both `#[cfg]` arms of it, and the fd-handoff branch inside
+    # them, still decide everything they decided before. The argv path drops
+    # `initial_history_ansi`, which is the right trade for the panes this can
+    # fire on: replaying a TUI's last screen into a process that is about to
+    # draw its own is noise, and there is no argv variant that takes it.
+    substituteInPlace src/persist/restore.rs \
+      --replace-fail '        let runtime_result = {' '        let drip_relaunch_argv = if was_imported { None } else { saved_launch_argv.clone().filter(|argv| argv.first().is_some_and(|program| !program.contains('"'"'/'"'"') || std::path::Path::new(program).exists())) }; let runtime_result = if let Some(argv) = drip_relaunch_argv.as_deref() { TerminalRuntime::spawn_argv_command(*id, rows, cols, cwd.clone(), argv, &launch_env, crate::pane::AgentDetection::Enabled, runtime_context.scrollback_limit_bytes, crate::terminal_theme::TerminalTheme::default(), None, runtime_context.events.clone(), runtime_context.render_notify.clone(), runtime_context.render_dirty.clone()) } else {'
+
+    # ...and the argv rides onto the restored terminal, so the NEXT snapshot has
+    # it too. Without this the fix would work exactly once: the relaunched pane
+    # would carry no `launch_argv`, and the restart after that would put the
+    # shell back. Stock's `if was_imported` block below is left alone and cannot
+    # double-set — `drip_relaunch_argv` is None on precisely the path that runs
+    # it.
+    substituteInPlace src/persist/restore.rs \
+      --replace-fail '                let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone());' '                let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone()); if let Some(argv) = drip_relaunch_argv { terminal = terminal.with_launch_argv(argv); }'
   '';
 })
