@@ -57,4 +57,18 @@ fi
 mkdir -p -- "$state_dir"
 printf '%s\n' "$desired" >"$state_file"
 
-exec bun "$root/bin/agent-view.js" "$desired"
+bun "$root/bin/agent-view.js" "$desired"
+
+# Nudge drip.reply-age, whose `$space` token is the workspace name and which
+# reports it only in `all` -- the column is one value repeated down the whole
+# list when the list is one space, which is why it is not in the rows. That
+# plugin reads THIS scope file, but on its own ten-second tick, so without
+# this the workspace column would take up to ten seconds to appear after you
+# widened the list and another ten to go away after you narrowed it. One
+# best-effort call turns that into a redraw.
+#
+# Not a dependency: `plugin action invoke` on a plugin that is not installed
+# fails, and this line does not care. agent-scope worked before reply-age
+# existed and still does.
+herdr=${HERDR_BIN_PATH:-herdr}
+"$herdr" plugin action invoke sync --plugin drip.reply-age >/dev/null 2>&1 || true
