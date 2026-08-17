@@ -7,6 +7,7 @@ mod config;
 mod form;
 mod input;
 mod keys;
+mod markdown;
 mod model;
 mod selftest;
 mod ui;

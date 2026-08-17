@@ -2,6 +2,7 @@
 
 use crate::app::App;
 use crate::bd::types::Bead;
+use crate::markdown;
 use crate::model::{status_glyph, status_label};
 use crate::ui::theme;
 use crate::ui::widgets::centered_rect;
@@ -54,10 +55,12 @@ pub fn build_lines(b: &Bead) -> Vec<Line<'static>> {
             "Description",
             Style::default().fg(theme::YELLOW),
         )));
-        lines.push(Line::from(Span::styled(
-            b.description.clone(),
-            Style::default().fg(theme::SUBTEXT),
-        )));
+        // DRIP CHANGE: this was one plain `Span` holding the whole description.
+        // bd descriptions are markdown and this repo's are heavily so, which
+        // meant the pane showed `##` and ``` as literal noise wrapped into a
+        // single paragraph. See `crate::markdown` for the renderer and for what
+        // it does not handle.
+        lines.extend(markdown::render(&b.description));
         lines.push(Line::raw(""));
     }
     if !b.dependencies.is_empty() {
