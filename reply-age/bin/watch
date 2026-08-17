@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Startup hook: keep every agent's reply age well inside its 30s TTL.
+#
+# Ten seconds because this is a CLOCK on screen, not a fact that changes when
+# something else does. Under a minute the row reads in seconds, so a tick much
+# slower than this shows you `12s` for half a minute; much faster and we are
+# spending two socket calls and a jq on a number that did not move. A tick is
+# one `herdr agent list` plus one report per agent -- cheap enough that ten is
+# comfortably affordable, dear enough not to make it one.
+set -uo pipefail
+
+interval=${HERDR_DRIP_REPLY_AGE_INTERVAL:-10}
+# `:-` only guards unset and empty. A non-numeric or zero interval makes
+# `sleep` fail instantly and there is nothing else in this loop to slow it
+# down, so a typo in the server's environment turns into a fork storm against
+# the herdr socket rather than times that refresh oddly. Fall back rather than
+# exit: the times are worth more than the setting.
+if [[ ! $interval =~ ^[1-9][0-9]*$ ]]; then
+  echo "HERDR_DRIP_REPLY_AGE_INTERVAL=$interval is not a positive whole number; using 10" >&2
+  interval=10
+fi
+
+root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+
+# No check for `jq` or for the herdr CLI here on purpose, the same call
+# beads/bin/watch makes: bin/sync degrades to a no-op on its own when either
+# is missing, and a watcher that gave up at startup would need a server
+# restart to notice a dependency that arrived a minute later -- which is
+# exactly the kind of thing you forget you did.
+while :; do
+  "$root/bin/sync"
+  sleep "$interval"
+done

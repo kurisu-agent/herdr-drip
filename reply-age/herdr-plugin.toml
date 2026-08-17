@@ -1,0 +1,26 @@
+id = "drip.reply-age"
+name = "Reply age"
+version = "0.1.0"
+# 0.8.0 rather than the 0.7.0 `pane report-metadata` alone would need: the
+# tokens below exist to be SORTED on, and the sort is `agent.view.set`'s
+# `sort:` field, which drip.agent-scope sets and which needs 0.8.0. A host
+# where this reported and nothing sorted would be a row of numbers nobody
+# asked for.
+min_herdr_version = "0.8.0"
+description = "How long since each agent last replied, as a $since sidebar token the agent list sorts on"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["bin/watch"]
+
+[[actions]]
+id = "sync"
+title = "Refresh agent reply ages now"
+contexts = ["workspace"]
+command = ["bin/sync"]
+
+[[actions]]
+id = "watch"
+title = "Start the reply-age watcher"
+contexts = ["workspace"]
+command = ["bin/watch"]

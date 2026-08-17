@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# One pass: stamp every agent's LAST REPLY and report it as sidebar tokens.
+#
+# What "last reply" means, because it is the whole semantic of this plugin:
+# the moment an agent last STOPPED WORKING. herdr's `agent_status` goes
+# `working` while a turn is in flight and lands on `idle`/`done`/`blocked`
+# when it is over -- and the instant it lands is the instant the reply is on
+# your screen. So the age counts up from that transition, not from when the
+# turn started and not from the last keystroke. While an agent is working the
+# number keeps climbing from its PREVIOUS reply, which is what you want: the
+# question the sidebar answers is "how long since this one said anything",
+# and an agent that has been grinding for forty minutes has not said anything
+# for forty minutes.
+#
+# herdr has no clock on this. `AgentInfo` carries `agent_status` and a
+# monotonic `state_change_seq` but no timestamp anywhere, so the stamps are
+# ours to keep -- in $HERDR_PLUGIN_STATE_DIR, so that restarting the watcher
+# does not reset every row to "just now".
+#
+# Three tokens per agent pane:
+#   $since      human, narrow: `now`, `12s`, `3m`, `1h20m`, `2d`
+#   $since_key  the same elapsed seconds, ZERO-PADDED, for the sort
+#   $space      the workspace name -- only while the list shows every space
+#
+# `since_key` is padded because herdr compares token sort values as STRINGS
+# (`sort_value` returns `EvalValue::String`, src/app/agent_view.rs:357), so
+# `"3"` would sort after `"10"`. Fixed width makes lexicographic order and
+# numeric order the same thing. Ascending = smallest elapsed = most recently
+# replied = top of the list, which is the default drip.agent-scope sets.
+set -uo pipefail
+
+herdr=${HERDR_BIN_PATH:-herdr}
+
+# How long a reported token survives without a refresh. Three ticks of the
+# default watcher interval, the same ratio worktree-tokens uses and for the
+# same reason: a watcher that dies should let the times FADE rather than
+# freeze a stale "2m" on screen forever. A row whose tokens expired keeps its
+# other rows and drops to the bottom of the sort (see the None ordering note
+# below), which reads as "we don't know" rather than as a lie.
+ttl_ms=${HERDR_DRIP_REPLY_AGE_TTL_MS:-30000}
+
+now=${EPOCHSECONDS:-$(date +%s)}
+
+# The metadata sequence herdr checks per source is STRICTLY increasing
+# (`seq > *last`, src/metadata_tokens.rs:22), so a whole-second seq silently
+# DISCARDS a second report in the same second -- which is exactly the case
+# that matters here, because drip.agent-scope invokes this the moment you
+# toggle the scope and that can easily land in the same second as a tick.
+# EPOCHREALTIME is microseconds and is bash's own, so it needs no `date +%N`
+# (which BSD date, and therefore macOS, does not have).
+seq=${EPOCHREALTIME:-}
+seq=${seq/./}
+[[ $seq =~ ^[0-9]+$ ]] || seq=$(date +%s)000000
+
+state_dir=${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr/plugins/drip.reply-age}
+stamps=$state_dir/stamps.json
+
+# Whose scope this is: drip.agent-scope's own state file, read-only. That file
+# is already a shared contract between the plugin and the sidebar-scope-icon
+# patch, which both write it; this is a third READER and writes nothing, so it
+# cannot get between them. See "$space, and why this plugin reports it" in the
+# README.
+scope_file=${HERDR_DRIP_AGENT_SCOPE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-drip/agent-scope}
+scope=current
+if [[ -r $scope_file ]]; then
+  read -r scope <"$scope_file" || scope=current
+fi
+[[ $scope == all ]] || scope=current
+
+command -v jq >/dev/null 2>&1 || exit 0
+
+agents=$("$herdr" agent list 2>/dev/null | jq -c '.result.agents // []') || agents=
+[[ -n $agents ]] || exit 0
+
+# Only looked up in `all` scope: in `current` scope every row is in the same
+# space, so the name is one value repeated down the whole list and the token
+# is cleared instead of reported.
+labels='{}'
+if [[ $scope == all ]]; then
+  labels=$("$herdr" workspace list 2>/dev/null |
+    jq -c '[.result.workspaces[] | {key: .workspace_id, value: .label}] | from_entries') || labels=
+  [[ -n $labels ]] || labels='{}'
+fi
+
+prev='{}'
+if [[ -r $stamps ]]; then
+  prev=$(jq -c 'if type == "object" then . else {} end' <"$stamps" 2>/dev/null) || prev=
+  [[ -n $prev ]] || prev='{}'
+fi
+
+# Keyed by terminal_id, not pane_id. A pane id is a slot and herdr reuses it;
+# a terminal id belongs to one agent process for its whole life. Keying on the
+# slot would hand a brand new agent the dead one's reply time the first time a
+# closed pane's id came round again.
+pass=$(jq -c -n \
+  --argjson agents "$agents" \
+  --argjson prev "$prev" \
+  --argjson labels "$labels" \
+  --argjson now "$now" '
+  def human($s):
+    if   $s < 5     then "now"
+    elif $s < 60    then "\($s)s"
+    elif $s < 3600  then "\(($s / 60) | floor)m"
+    elif $s < 86400 then
+      (($s / 3600) | floor) as $h
+      | ((($s % 3600) / 60) | floor) as $m
+      | if $m == 0 then "\($h)h" else "\($h)h\($m)m" end
+    else "\(($s / 86400) | floor)d"
+    end;
+
+  # Nine digits covers three centuries of elapsed seconds; the sort only needs
+  # every key to be the same width as every other.
+  def pad9($n): ("00000000" + ($n | tostring)) | .[-9:];
+
+  # The stopped states -- everything that is not `working` and not `unknown`.
+  # `unknown` is detection having lost the thread, not an agent that finished,
+  # so a hop through it must not be read as a reply landing.
+  def stopped: . == "idle" or . == "done" or . == "blocked";
+
+  [ $agents[]
+    | . as $a
+    | ($prev[$a.terminal_id] // null) as $p
+    | ( if $p == null then
+          # First sight. We cannot know this agent history -- herdr keeps no
+          # timestamp to ask -- so `now` is a guess, and the honest kind: on a
+          # cold start EVERY pane gets the same stamp, so they tie and the
+          # list keeps herdr own order rather than one row lying its way to
+          # the top. Corrects itself at the pane next reply.
+          $now
+        elif ($a.agent_status | stopped)
+             and (($a.state_change_seq != $p.seq) or ($p.working == true))
+        then
+          # A reply just landed. `state_change_seq` bumps ONLY on a real
+          # agent-state change (src/app/actions.rs:3005), so "seq moved and we
+          # are now stopped" means the agent ARRIVED at stopped since the last
+          # tick -- and it catches working -> unknown -> idle, which comparing
+          # statuses alone would miss. The `$p.working` clause is the belt to
+          # that braces: a working -> stopped we can see directly.
+          $now
+        else
+          ($p.stamp // $now)
+        end ) as $stamp
+    # Clamped: a clock that steps backwards should read `now`, not sort as if
+    # the agent replied in the future.
+    | ([$now - $stamp, 0] | max) as $elapsed
+    | { terminal_id: $a.terminal_id,
+        pane_id: $a.pane_id,
+        stamp: $stamp,
+        seq: $a.state_change_seq,
+        working: ($a.agent_status == "working"),
+        since: human($elapsed),
+        key: pad9($elapsed),
+        space: ($labels[$a.workspace_id] // null) }
+  ]
+  | { state: (map({ key: .terminal_id, value: { stamp, seq, working } }) | from_entries),
+      reports: . }
+') || exit 0
+[[ -n $pass ]] || exit 0
+
+# Written before the reports go out, and replaced atomically: a sync that dies
+# half way through reporting has still recorded what it observed, so the next
+# one does not re-stamp everything it already saw as a fresh round of replies.
+mkdir -p -- "$state_dir"
+if printf '%s\n' "$pass" | jq -c '.state' >"$stamps.tmp" 2>/dev/null; then
+  mv -- "$stamps.tmp" "$stamps"
+else
+  rm -f -- "$stamps.tmp"
+fi
+
+# One report per pane carrying all three tokens. `space` is CLEARED rather
+# than omitted when it should not show: pane metadata tokens are patched, not
+# replaced (src/metadata_tokens.rs:44), so an omitted token would linger under
+# its old TTL and leave the workspace name on screen for another half minute
+# after you narrowed the list back to one space.
+printf '%s\n' "$pass" |
+  jq -r '.reports[] | [.pane_id, .since, .key, (.space // "")] | @tsv' |
+while IFS=$'\t' read -r pane since key space; do
+  [[ -n $pane ]] || continue
+  if [[ -n $space ]]; then
+    space_arg=(--token "space=$space")
+  else
+    space_arg=(--clear-token space)
+  fi
+  "$herdr" pane report-metadata "$pane" --source drip.reply-age \
+    --token "since=$since" --token "since_key=$key" "${space_arg[@]}" \
+    --seq "$seq" --ttl-ms "$ttl_ms" \
+    >/dev/null 2>&1 || true
+done
