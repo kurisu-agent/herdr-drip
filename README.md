@@ -45,7 +45,8 @@ under zellij (`Ctrl+b r`/`d`/`x` for split/close, `Ctrl+b [` to flip a split,
 `Ctrl+b a` as a second way to widen or narrow the agent list — the icon in its
 header is the first — `Ctrl+b B`/`Ctrl+b O` for the bd board docked or in a
 tab, `Alt+Shift+arrows` for pane focus), sidebar rows wired to the plugins'
-`$worktree` token, a tab bar that hides itself while there is only one tab
+`$since`, `$space` and `$worktree` tokens (**reply-age**, below), a tab bar
+that hides itself while there is only one tab
 (`hide_tab_bar_when_single_tab` — one tab is not a choice, so the row showing
 it is a line of terminal spent on nothing), the colour scheme (below), and the
 experimental kitty-graphics switch. Adopt it with:
@@ -1208,8 +1209,10 @@ existing vocabulary, no new glyph to learn. Deliberately **not** the Material
 Design plane `sidebar-version`'s drop lives in, whose codepoints moved
 wholesale in Nerd Fonts v3 and render as tofu on an older patched font — a
 one-column cell has nothing to degrade into. The cell also keeps herdr's own
-colour rule for it: accent while a view is active, neutral otherwise, so scope
-reads twice over.
+colour rule for it: accent while a view is active, neutral otherwise. That
+used to make scope read twice over; since **reply-age** the drip keeps a view
+active in *both* scopes (the sort has nowhere else to live), so the colour is
+now constant and the glyph carries the whole message on its own.
 
 **It lands in the cell `sidebar-quiet-chrome` emptied, and that cell was
 already dead.** `on_agent_panel_sort_toggle` — herdr's hit test for the sort
@@ -1236,6 +1239,18 @@ All three are patched, none is bypassed:
   those three are all reachable from `AppState` — which matters, because
   `handle_mouse` is `impl AppState` and has no `App` to dispatch an API call
   with.
+
+**Known gap: clicking the cell drops the reply-age sort.** `drip_toggle_agent_scope`
+builds its view with `sort: Vec::new()` and its `all` arm sets
+`agent_view_override = None`, both of which predate the sort existing — so the
+click reaches the right SCOPE and the wrong ORDER, in either direction. The
+plugin's own paths are unaffected (`Ctrl+b a`, the three actions, and the
+`[[startup]]` re-apply after every session restore all go through
+`bin/agent-view.js`), so the list comes back sorted the next time any of those
+runs. Closing it properly is two lines in this file — carry `SORT` in the
+`current` arm and set the sort-only view under `plugin:drip.reply-age` in the
+`all` arm, mirroring `bin/agent-view.js` — and one rebuild of herdr, which is
+why it is written down here rather than done in passing.
 
 The state and glyphs live in `nix/agent-scope-icon.rs`, appended to
 `app/state.rs` rather than to the sidebar: the renderer and `app::input` both
@@ -1456,8 +1471,27 @@ this. `agent.view.set` takes a filter, and
 is resolved by herdr *on every render*, against the workspace being presented
 (the active one, or the selected one while navigating). So the plugin is
 invoked once and the panel follows your focus from then on. `all` does not set
-a filter that matches everything; it **clears** the view, because an inactive
-view is stock behaviour, which is what "every space" means.
+a filter that matches everything either — there is nothing left to filter on.
+
+**But `all` no longer clears the view, and that is the one thing about this
+plugin that changed when reply-age arrived.** herdr holds exactly one agent
+view, so the ORDER of the list has to ride in the same object as the filter or
+it cannot exist at all — and newest-reply-first is the drip's default now, not
+a property of one scope. So `all` sets a view carrying only the sort:
+
+```json
+{"source": "plugin:drip.reply-age", "sort": [{"field": {"token": "since_key"}, "order": "asc"}]}
+```
+
+**Under reply-age's source, not this plugin's**, which is load-bearing twice
+over. herdr clears a plugin-owned view when that plugin goes away, so a sort
+over tokens nobody reports any more leaves with the reporter. And
+`drip_scope_is_current()` — the thing **sidebar-scope-icon** asks to pick its
+glyph — is `agent_view_override.source == "plugin:drip.agent-scope"`, so
+reusing this plugin's source here would have left the header drawing the
+one-window glyph over a list of every space: the icon lying about the only
+thing it is there to say. If reply-age is not installed, `all` falls back to
+the clear it used to do — there would be no `since_key` to sort on anyway.
 
 The scope is one word in `$XDG_STATE_HOME/herdr-drip/agent-scope`
 (`$HERDR_DRIP_AGENT_SCOPE_FILE` overrides), so a toggle survives the next
@@ -1488,6 +1522,119 @@ Two details worth knowing:
   so a disabled plugin cannot leave your agent panel filtered with nothing
   left to unfilter it. `all` clears only that source, never a view another
   plugin set.
+
+## reply-age: how long since each agent said anything
+
+Twelve agents in the sidebar and no way to tell which one just finished. This
+plugin puts the answer on every row and sorts the list by it, newest reply at
+the top:
+
+```
+◐ 12s  impl        ✳ 4m   dr-0157
+  Reading src/app/agent_view.rs      Convert beads sidebar into workspace panel
+```
+
+**"Last reply" means the moment an agent last STOPPED working.** herdr's
+`agent_status` reads `working` while a turn is in flight and lands on
+`idle`/`done`/`blocked` when it is over, and the instant it lands is the
+instant the reply is on your screen. So the number counts up from that
+transition — not from when the turn started, and not from your last keystroke.
+While an agent is working it keeps climbing from the agent's *previous* reply,
+which is the point: an agent that has been grinding for forty minutes has not
+said anything for forty minutes, and that is exactly what you want to notice.
+
+**herdr has no clock on this, so the stamps are ours.** `AgentInfo` carries
+`agent_status` and a monotonic `state_change_seq` and no timestamp anywhere.
+Each tick reads `herdr agent list`, compares it against the last tick, and
+stamps `now` on any agent that has ARRIVED at a stopped state — `seq` moved
+and the status is one of the three. Reading the seq rather than only comparing
+statuses is what catches a hop through `unknown`, which is detection losing
+the thread rather than a turn ending. State lives in
+`$HERDR_PLUGIN_STATE_DIR/stamps.json` so restarting the watcher does not reset
+every row to "just now", and it is keyed by **terminal id, not pane id**: a
+pane id is a slot herdr reuses, and keying on the slot would hand a brand new
+agent the dead one's reply time.
+
+An agent seen for the first time is stamped `now`, and that is a guess — the
+honest kind. There is nothing to ask, and on a cold start *every* pane gets
+the same stamp, so they tie and the list keeps herdr's own order rather than
+one row lying its way to the top. It corrects itself at that pane's next
+reply.
+
+**Three tokens, because one number has two jobs:**
+
+| Token | Is | For |
+| --- | --- | --- |
+| `$since` | `now`, `12s`, `3m`, `1h20m`, `2d` | reading |
+| `$since_key` | the same elapsed seconds, zero-padded to nine digits | sorting |
+| `$space` | the workspace name — only while the list shows every space | telling two repos apart |
+
+`since_key` is padded because **herdr compares token sort values as strings**
+(`sort_value` returns `EvalValue::String`), so `"3"` would sort after `"10"`.
+Fixed width makes lexicographic order and numeric order the same thing.
+Ascending on it is smallest-elapsed-first, which is newest-reply-at-the-top.
+
+Agents with no token — a pane the watcher has not reached, a non-agent kind,
+or every row at once if the watcher died and the 30s TTLs ran out — land at
+the **bottom**, and nothing here arranges that: herdr orders a missing sort
+value last in *both* directions (`compare_optional_values` reverses for `desc`
+only inside the both-present arm). Nothing should arrange it either — a
+sentinel key meaning "unknown" would be indistinguishable from an agent that
+genuinely replied that long ago.
+
+### `$space`, and why this plugin reports it
+
+The agent row used to carry `workspace`, and it was dead weight:
+drip.agent-scope narrows the list to the space you are looking at by default,
+so the column was one value repeated down every row. Replacing it with the age
+is most of the point of this plugin.
+
+That leaves one real tension. In **every space** the name stops being
+redundant — it is then the only thing telling two repos' agents apart, and
+`$worktree` does not cover it, because worktree-tokens reports nothing for a
+main checkout on purpose. Rows are *config* (`[ui.sidebar.agents.rows_by_agent]`)
+and the scope is a *view*, and nothing in herdr changes rows at runtime, so
+they cannot be swapped when the scope flips.
+
+They do not have to be. **A missing custom token is dropped from its row, and
+a row left with nothing in it is dropped whole** — so a token reported in one
+scope and cleared in the other *is* a column that comes and goes. `$space` is
+that: the workspace label, reported only while drip.agent-scope's state file
+says `all`. It is cleared explicitly rather than merely omitted, because pane
+metadata tokens are patched rather than replaced and an omitted one would sit
+there under its old TTL for another half minute.
+
+It is reported by **this** plugin rather than by agent-scope, which owns the
+scope, for one reason: this is the only watcher in the drip already paying for
+a per-agent `herdr agent list` tick, and a second plugin polling the same list
+every ten seconds to fill one column would be a poor trade. agent-scope's
+`bin/scope` nudges `bin/sync` after a change so the column appears and
+disappears with the toggle instead of on the tick; a host without this plugin
+ignores that line. The scope file is already a contract between two writers
+(the plugin and the sidebar-scope-icon patch); this is a third party that only
+ever reads it.
+
+### Knobs
+
+```
+HERDR_DRIP_REPLY_AGE_INTERVAL   watcher tick, seconds (default 10)
+HERDR_DRIP_REPLY_AGE_TTL_MS     token lifetime (default 30000, three ticks)
+```
+
+Ten seconds because this is a clock on screen rather than a fact that changes
+when something else does: under a minute the row reads in seconds, so a slower
+tick shows you `12s` for half a minute, and a faster one spends two socket
+calls on a number that did not move. The TTL is three ticks so a watcher that
+dies lets the times **fade** rather than freezing a stale `2m` on screen
+forever — the row drops to the bottom of the sort, which reads as "we don't
+know" instead of as a lie.
+
+`bin/sync` is one pass and the thing to invoke after a change rather than
+waiting out the interval:
+
+```
+herdr plugin action invoke sync --plugin drip.reply-age
+```
 
 ## Adding a plugin
 
