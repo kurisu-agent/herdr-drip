@@ -976,10 +976,11 @@ herdrPkg.overrideAttrs (old: {
       --replace-fail '    drip_render_accounts_collapsed(app, frame, drip_accounts_rect(area, detail_area, 1), &drip_account_dots(&drip_accounts_lines())); let detail_content_area = Rect::new(' '    let (drip_beads_area, drip_accounts_area) = drip_beads_rects_collapsed(area); drip_render_beads_collapsed(app, frame, drip_beads_area, &drip_beads_lines()); drip_render_accounts_collapsed(app, frame, drip_accounts_area, &drip_account_dots(&drip_accounts_lines())); let detail_content_area = Rect::new('
 
     # app::input reads the geometry through `crate::ui`, so the rail's rect,
-    # its hit test and its toggle join the sidebar re-export list — the same
-    # line the tab tree's two names were appended to just above.
+    # its two hit tests, its toggle and the call that opens the board join the
+    # sidebar re-export list — the same line the tab tree's two names were
+    # appended to just above.
     substituteInPlace src/ui.rs \
-      --replace-fail '        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections, drip_tab_tree_caret_at, drip_tab_tree_target_at,' '        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections, drip_beads_rect, drip_beads_summary_hit, drip_beads_toggle_open, drip_tab_tree_caret_at, drip_tab_tree_target_at,'
+      --replace-fail '        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections, drip_tab_tree_caret_at, drip_tab_tree_target_at,' '        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections, drip_beads_more_hit, drip_beads_open_board, drip_beads_rect, drip_beads_summary_hit, drip_beads_toggle_open, drip_tab_tree_caret_at, drip_tab_tree_target_at,'
 
     # The click. Asked in the agent-panel stretch of the LEFT-button branch
     # rather than the workspace-list one, because that is where the rail's rows
@@ -987,7 +988,12 @@ herdrPkg.overrideAttrs (old: {
     # the sort toggle, which is the first thing that looks in this region.
     # Nothing else claims these rows: the carve took them out of the agent
     # list, so `agent_detail_target_at` has already stopped answering here.
+    #
+    # ONE entry point for the rail's two clickable rows — the summary line and
+    # the row that opens the board — rather than two anchors here. Which row
+    # was hit is the rail's own geometry, and this file should not have to know
+    # the rail has grown one.
     substituteInPlace src/app/input/mouse.rs \
-      --replace-fail '                    if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {' '                    if self.drip_toggle_beads_at(mouse.column, mouse.row) { return None; } if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {'
+      --replace-fail '                    if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {' '                    if self.drip_beads_click_at(mouse.column, mouse.row) { return None; } if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {'
   '';
 })

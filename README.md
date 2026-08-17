@@ -608,6 +608,7 @@ Above the accounts rail, a summary line you can click:
 ◐ dr-09 injector retry
 ◐ dr-14 turnpike egress
 ◐ dr-02 kart lifecycle
+… show more        +39
 ```
 
 Click the summary and it folds back to the one line. The counts are
@@ -636,18 +637,24 @@ in a pane the size of a board. Here the list is truncated to whatever rows the
 sidebar has left after the agent panel, and a list that drops its tail has to
 keep the blocked rows at the top or the truncation lies.
 
+**The last row opens the board** (`… show more`, with the number of beads that
+did not fit pushed to the right edge). It is drawn as the final item of the
+list rather than as a button under it, and it invokes the same `open-tab`
+action `Ctrl+b O` does — so a second click on it puts the tab away again.
+
 On a board with nothing in progress the rail says so rather than going away:
 
 ```
 ──────────────────────
 ▾ beads
 • nothing in progress
+… show more
 ```
 
 That sentence is a row in the file like any other (`--`, the unknown status),
 written by the plugin rather than known to herdr, so which words appear follow
-the vocabulary the rail is filtered to. A rail that vanished instead would be
-read as a broken rail, every time somebody closed their last bead.
+the vocabulary the rail is filtered to. A rail that vanished instead would take
+the way to the board with it, every time somebody closed their last bead.
 
 The glyphs are herdr-beads' `status_glyph`, kept identical so the two read as
 the same tool:
