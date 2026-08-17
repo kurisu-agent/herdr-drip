@@ -36,6 +36,19 @@
 // deliberately dumb contract the accounts rail has with gumbo, and for the
 // same reason: changing how the rail LOOKS must never mean rebuilding herdr.
 //
+// `-` is also how the writer says something that is not a bead at all. The
+// rail shows in-progress work only now (beads/bin/board.js), so a board with
+// nothing running is the ordinary case rather than the odd one, and the writer
+// sends `-- nothing in progress` for it: one row, the unknown status' dim
+// glyph, a sentence where a bead would be. Which sentence, and whether there
+// is one, stays the writer's business for exactly the reason the layout does
+// -- the status vocabulary is a setting, and a herdr with the words compiled
+// into it would need rebuilding to change one.
+//
+// The last row of an OPEN rail is not from the file at all: it is the way to
+// the board, drawn as the final item of the list and clicked like one. See
+// `drip_beads_more_line` and `drip_beads_open_board`.
+//
 // The rail sits directly ABOVE the accounts rail, which is a carve chained
 // onto that one rather than a second opinion about where the agent panel
 // ends. See `drip_beads_split` and `drip_beads_bands` for the two halves of
@@ -52,6 +65,15 @@ const DRIP_BEADS_HEADER_ROWS: u16 = 1;
 /// is both the rail's whole content when closed and the thing you click to
 /// open it.
 const DRIP_BEADS_SUMMARY_ROWS: u16 = 1;
+
+/// The last row of an open rail: the one that opens the board. It is drawn as
+/// the final item of the LIST rather than as a button under it -- the rail has
+/// no chrome to hang a button off, and a row shaped like the rows above it is
+/// a row the reader already knows how to click. Always present while the rail
+/// is open, even on a board short enough to fit whole, because a bottom row
+/// that is sometimes a control and sometimes a bead is the arrangement that
+/// gets mis-clicked.
+const DRIP_BEADS_MORE_ROWS: u16 = 1;
 
 /// A file older than this is treated as absent, on the same reasoning as the
 /// accounts rail: a watcher that was killed leaves its last frame on disk, and
@@ -386,10 +408,11 @@ pub(crate) fn drip_beads_toggle_open() {
 ///
 /// The chrome -- separator plus summary -- is all it asks for when closed, and
 /// it asks for nothing at all when there are no beads or when the agent panel
-/// cannot spare even that. Open, it asks for a row per bead on top and takes
-/// whatever of that fits; a board longer than the sidebar is truncated rather
-/// than scrolled, because the rail is a glance and the pane app is the place
-/// to read a long board.
+/// cannot spare even that. Open, it asks for a row per bead plus the row that
+/// opens the board, and takes whatever of that fits; a board longer than the
+/// sidebar is truncated rather than scrolled, because the rail is a glance and
+/// the pane app is the place to read a long board -- which is what the extra
+/// row is for.
 /// `open` is passed rather than read so this stays a pure function of the
 /// numbers -- the same reason [`drip_accounts_split`] takes its rows instead of
 /// fetching them.
@@ -408,7 +431,9 @@ fn drip_beads_rail_rows(detail_h: u16, lines: &[DripBeadLine], footer: u16, open
         // `try_from` rather than `as`: a board of exactly 65 536 beads would
         // truncate to zero and ask for chrome only, which is the one board
         // length that would silently refuse to open.
-        chrome.saturating_add(u16::try_from(lines.len()).unwrap_or(u16::MAX))
+        chrome
+            .saturating_add(u16::try_from(lines.len()).unwrap_or(u16::MAX))
+            .saturating_add(DRIP_BEADS_MORE_ROWS)
     } else {
         chrome
     };
@@ -597,6 +622,67 @@ pub(crate) fn drip_beads_summary_hit(rail: Rect, col: u16, row: u16) -> bool {
         && col < rail.x + rail.width
 }
 
+/// Whether `(col, row)` is on the row that opens the board -- the last row of
+/// a rail that has a body.
+///
+/// The height test is what keeps this off the summary line: a CLOSED rail is
+/// exactly the chrome, so its last row IS the summary, and a naive "bottom
+/// row" test would make one click both toggle the rail and open a tab. The
+/// rail only grows past the chrome when there is something under the summary
+/// to draw, which is precisely when this row exists.
+pub(crate) fn drip_beads_more_hit(rail: Rect, col: u16, row: u16) -> bool {
+    rail.width > 0
+        && rail.height > DRIP_BEADS_HEADER_ROWS + DRIP_BEADS_SUMMARY_ROWS
+        && row == rail.y + rail.height - 1
+        && col >= rail.x
+        && col < rail.x + rail.width
+}
+
+/// Open the board in a tab, by invoking the plugin's own `open-tab` action.
+///
+/// The rail cannot open a pane itself. This code is reached from `AppState`,
+/// which owns the sidebar's geometry and its hit tests; panes are opened by
+/// `App`, and a hit test has no route to it. So the click takes the road the
+/// keybinding already takes (`prefix+shift+o`, config/herdr.toml): spawn the
+/// herdr CLI and let it ask the running server over the socket. That keeps ONE
+/// definition of what opening the board means -- beads/bin/open-tab, which
+/// also knows how to close it again, so a second click on this row puts the
+/// tab away -- rather than a second one wired into the chrome.
+///
+/// `current_exe` rather than a PATH lookup: the binary drawing this rail is
+/// the one that can talk to the session drawing it, and a `herdr` earlier on
+/// PATH may be neither. The socket is named explicitly for the same reason
+/// herdr's own `custom_command_env` names it for a keybinding's command.
+///
+/// Everything is best-effort and silent, like the toggle beside it -- a rail
+/// has nowhere to put an error. The child is reaped by a thread that does
+/// nothing else, so a session where the board is opened all day does not
+/// collect zombies.
+pub(crate) fn drip_beads_open_board() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut command = std::process::Command::new(exe);
+    command
+        .args([
+            "plugin",
+            "action",
+            "invoke",
+            "open-tab",
+            "--plugin",
+            "drip.beads",
+        ])
+        .env(crate::api::SOCKET_PATH_ENV_VAR, crate::api::socket_path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    if let Ok(mut child) = command.spawn() {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Draw.
 // ---------------------------------------------------------------------------
@@ -639,11 +725,15 @@ pub(crate) fn drip_render_beads(
     // by the writer: see [`drip_bead_counts_with`]. Read here rather than
     // passed in, because the patch anchors hand this function the rows and
     // nothing else, and this is a cached read of a file that was already read
-    // to produce them.
+    // to produce them. ONCE, and shared with the row below: the two numbers on
+    // screen -- what the board holds and how much of it is off the rail -- are
+    // the same reading, and a second call could straddle the 500 ms throttle
+    // and disagree with the first.
+    let totals = drip_beads_totals();
     frame.render_widget(
         Paragraph::new(drip_beads_summary_line(
             lines,
-            drip_beads_totals(),
+            totals,
             summary.width,
             body_h > 0,
             p,
@@ -654,7 +744,12 @@ pub(crate) fn drip_render_beads(
     if body_h == 0 {
         return;
     }
-    for (index, line) in lines.iter().take(body_h as usize).enumerate() {
+    // The beads get what is left after the row that opens the board, which is
+    // drawn last and always: see [`DRIP_BEADS_MORE_ROWS`]. `body_h` is at
+    // least one here, so the subtraction is the row count and not a wrap.
+    let beads_h = body_h - DRIP_BEADS_MORE_ROWS;
+    let drawn = lines.len().min(beads_h as usize);
+    for (index, line) in lines.iter().take(drawn).enumerate() {
         let row = Rect::new(area.x, body_y + index as u16, area.width, 1);
         let glyph = drip_bead_glyph(line.status);
         let text_width = area
@@ -674,6 +769,81 @@ pub(crate) fn drip_render_beads(
             row,
         );
     }
+
+    frame.render_widget(
+        Paragraph::new(drip_beads_more_line(
+            drip_beads_hidden(lines, totals, drawn),
+            area.width,
+            p,
+        )),
+        Rect::new(
+            area.x,
+            area.y + area.height - DRIP_BEADS_MORE_ROWS,
+            area.width,
+            DRIP_BEADS_MORE_ROWS,
+        ),
+    );
+}
+
+/// How many beads the board is carrying that the rail is not drawing.
+///
+/// Two truncations stack up before this: the writer sends five rows of however
+/// many the board has, and the carve draws however many of those fit. Only the
+/// first is visible in the numbers -- the totals line is what the board holds
+/// -- so this counts from there and falls back to the rows when the writer
+/// said nothing, which is the same degradation [`drip_bead_counts_with`] has.
+fn drip_beads_hidden(lines: &[DripBeadLine], totals: Option<[usize; 3]>, drawn: usize) -> usize {
+    let board = match totals {
+        // `max` because the totals line counts three statuses and the rail can
+        // draw seven: a rail whose vocabulary includes `hooked` would
+        // otherwise be told the board is smaller than what is on screen, and
+        // claim `+0` with beads scrolled off it. Saturating into silence is
+        // the wrong answer; taking the rows as a floor is the right one.
+        Some(counts) => counts.iter().sum::<usize>().max(lines.len()),
+        None => lines.len(),
+    };
+    board.saturating_sub(drawn)
+}
+
+/// The row that opens the board: a dim ellipsis where a bead's glyph would be,
+/// the words, and how many beads are not on screen pushed to the right edge.
+///
+/// The two-column shape is the point -- glyph, space, text, exactly like the
+/// rows above it -- so it reads as the last item of the list rather than as a
+/// button bolted under it. The count gets the same right-edge treatment the
+/// summary line gives its counts, and is dropped the same way when the sidebar
+/// is too narrow to hold it: what survives is the words, because they are what
+/// says the row can be clicked.
+///
+/// `+0` is never drawn. A rail showing the whole board still offers this row
+/// -- the board is more than more rows, it is the detail pane and the views
+/// and the keys that write back -- but a count of nothing hidden is noise.
+fn drip_beads_more_line(hidden: usize, width: u16, p: &Palette) -> Line<'static> {
+    const GLYPH: &str = "…";
+    const LABEL: &str = "show more";
+
+    let lead = display_width(GLYPH) + 1;
+    let mut spans = vec![
+        Span::styled(
+            format!("{GLYPH} "),
+            Style::default().fg(p.overlay0),
+        ),
+        Span::styled(
+            truncate_end(LABEL, (width as usize).saturating_sub(lead)),
+            Style::default().fg(p.overlay1),
+        ),
+    ];
+    if hidden == 0 {
+        return Line::from(spans);
+    }
+    let count = format!("+{hidden}");
+    let gap = (width as usize).saturating_sub(lead + display_width(LABEL) + display_width(&count));
+    if gap == 0 {
+        return Line::from(spans);
+    }
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.push(Span::styled(count, Style::default().fg(p.overlay0)));
+    Line::from(spans)
 }
 
 /// The summary line: a caret and the word, then the counts pushed to the right
@@ -916,8 +1086,9 @@ mod drip_beads_tests {
 
     #[test]
     fn drip_beads_rail_rows_adds_a_row_per_bead_when_open() {
+        // Chrome, two beads, and the row that opens the board.
         let lines = vec![bead('o', '2', "a"), bead('b', '0', "b")];
-        assert_eq!(drip_beads_rail_rows(40, &lines, 0, true), 4);
+        assert_eq!(drip_beads_rail_rows(40, &lines, 0, true), 5);
     }
 
     #[test]
@@ -1005,6 +1176,46 @@ mod drip_beads_tests {
         let (beads, accounts) = drip_beads_bands_from(band, 99, DRIP_FOOTER_ROWS);
         assert_eq!(beads.height, 0);
         assert_eq!(accounts, band);
+    }
+
+    #[test]
+    fn drip_beads_hidden_counts_the_board_the_writer_reported() {
+        // Five rows of a forty-six-bead board, four of them drawn: the rest is
+        // what the row that opens the board reports.
+        let lines: Vec<DripBeadLine> = (0..5).map(|_| bead('o', '2', "a")).collect();
+        assert_eq!(drip_beads_hidden(&lines, Some([3, 2, 41]), 4), 42);
+        // Nothing hidden is nothing said.
+        assert_eq!(drip_beads_hidden(&lines, Some([0, 5, 0]), 5), 0);
+        // A writer that says nothing leaves the rows as the whole board.
+        assert_eq!(drip_beads_hidden(&lines, None, 3), 2);
+        // Totals smaller than the rows -- a vocabulary the totals line does
+        // not count -- never reports fewer beads than are on screen.
+        assert_eq!(drip_beads_hidden(&lines, Some([0, 0, 0]), 5), 0);
+        assert_eq!(drip_beads_hidden(&lines, Some([0, 0, 0]), 2), 3);
+    }
+
+    #[test]
+    fn drip_beads_more_hit_is_the_last_row_of_an_open_rail() {
+        // Separator, summary, two beads and the row that opens the board.
+        let rail = Rect::new(2, 7, 24, 5);
+        let last = rail.y + rail.height - 1;
+        assert!(drip_beads_more_hit(rail, 2, last));
+        assert!(drip_beads_more_hit(rail, 25, last));
+        // Not a bead row, not the summary, not past the right edge.
+        assert!(!drip_beads_more_hit(rail, 10, last - 1));
+        assert!(!drip_beads_more_hit(rail, 10, rail.y + DRIP_BEADS_HEADER_ROWS));
+        assert!(!drip_beads_more_hit(rail, 26, last));
+    }
+
+    #[test]
+    fn drip_beads_more_hit_is_not_the_summary_of_a_closed_rail() {
+        // A closed rail is exactly the chrome, so its last row is the summary
+        // line -- which must keep toggling the rail and must not open a tab.
+        let closed = Rect::new(2, 7, 24, DRIP_BEADS_HEADER_ROWS + DRIP_BEADS_SUMMARY_ROWS);
+        let summary = closed.y + DRIP_BEADS_HEADER_ROWS;
+        assert!(drip_beads_summary_hit(closed, 10, summary));
+        assert!(!drip_beads_more_hit(closed, 10, summary));
+        assert!(!drip_beads_more_hit(Rect::default(), 0, 0));
     }
 
     #[test]
