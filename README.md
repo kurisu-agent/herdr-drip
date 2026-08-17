@@ -870,6 +870,12 @@ same way the plugin directories curate everything else. Current set:
 - **single-pane-borders** — a lone pane keeps its frame. Not the
   `ui.pane_borders` setting, which is already on: herdr ANDs it with a
   hardcoded `pane_count() > 1`. See below.
+- **tab-pane-count** — a tab bar label says how many panes the tab is holding,
+  `<icon> ·3 impl`, and says nothing at all for the single-pane tab that is the
+  common case. A tab label is composed in the renderer from `custom_name` or
+  the tab number; a plugin's text surfaces are the sidebar's per-row tokens and
+  the tab bar's right-hand status segments, neither of which is a tab's own
+  cell. See below.
 - **sidebar-quiet-chrome** — the sidebar's section labels go: `new` and `menu`
   under the workspace list, `agents` over the agent panel, and the
   `grouped`/`priority` tag in its corner. Each names something the rows below
@@ -1131,6 +1137,56 @@ for a lone pane — `pane_to_right`/`pane_below` find no neighbour, and the gap
 shrink is keyed on having found one. The one use that is not about chrome is
 `should_dim`, which greys *unfocused* panes; with one pane in the layout that
 pane is the focused one, so it cannot fire either.
+
+### tab-pane-count: a tab says how many panes it is holding
+
+The tab bar tells you what a space's tabs are *called* and nothing about what
+is inside them, so a tab holding one agent and a tab holding four look
+identical until you switch to it. With **shell-panes** above, that number is
+the interesting one: how many panes a tab holds is how much work is parked in
+there.
+
+The marker goes **after the icon and before the word** — `<icon> ·3 impl` —
+because the icon is where the eye lands first in a strip of tabs, so the count
+is what it reads second, and the name keeps the tail of the cell, which is the
+end a truncating label loses characters from anyway. That means splicing the
+count *into* the name rather than appending it: the glyph is not a field beside
+the name, it is the name's first character, whether it arrived from a rename
+preset (`<icon> implementation`) or a plugin's manifest pane title
+(`<icon> beads`). A name with no leading private-use glyph — one someone typed, or the
+tab-number fallback — puts the count in front instead, which is the same rule:
+count, then name.
+
+`·` (U+00B7) and not a bare number, because the fallback name for an unnamed
+tab *is* a number and `2 3` is a label that says nothing twice; not `×`, which
+in a tab bar is the close button in every GUI there is, and herdr's tab cells
+are clickable; not a superscript, which is one column in the fonts that have it
+and tofu in the ones that do not. U+00B7 is Latin-1 — it is in the font
+whatever else is missing.
+
+**A single-pane tab shows nothing**, which is a decision about horizontal
+space: the tab strip is the scarce row, and it scrolls once the tabs overflow
+it. Same call as `hide_tab_bar_when_single_tab` in `config/herdr.toml` — one of
+a thing is not a choice, so the columns spent announcing it are spent on
+nothing.
+
+It is one anchor. `tab_chrome_label` is the single place a tab bar label is
+composed, and `tab_width` sizes each cell from `display_width_u16` of that same
+string, so the strip makes room for the marker with no layout code touched —
+the way herdr's own `Z` marker already rides. The two markers take opposite
+ends of the label rather than a shared suffix: the count sits with the icon at
+the head, `Z` stays the last thing in the cell, so a tab that is zoomed *and*
+holds three panes reads `<icon> ·3 impl Z` and neither marker has an opinion
+about the other. Zoom is also when the count says the most, being the state in
+which the other panes are invisible.
+
+The count is `tab.layout.pane_count()`, not `tab.panes.len()`. They agree by
+invariant — `Workspace::assert_invariants_for_test` asserts per tab that the
+layout's pane set and the pane-state map's keys are the same set — so this is
+a question of which
+structure the label describes: the layout tree is what the renderer splits into
+cells and what herdr's own chrome decisions read, while `panes` is a map keyed
+by id, the right answer to *which* panes and only incidentally to how many.
 
 ### sidebar-quiet-chrome: the sidebar stops narrating itself
 
