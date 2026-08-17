@@ -133,6 +133,7 @@ rec {
     "gumbo-usage"
     "hello"
     "pane-titles"
+    "reply-age"
     "smart-focus"
     "worktree-graph"
     "worktree-tokens"

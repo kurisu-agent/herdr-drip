@@ -327,6 +327,7 @@ in
         "flip-split"
         "gumbo-usage"
         "pane-titles"
+        "reply-age"
         "smart-focus"
         "worktree-graph"
         "worktree-tokens"
