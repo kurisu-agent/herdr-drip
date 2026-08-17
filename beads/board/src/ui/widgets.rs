@@ -107,6 +107,37 @@ pub fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     );
 }
 
+/// DRIP ADDITION. The draggable seam between the list and the detail pane.
+///
+/// One column wide, which is the whole grab target, so it is drawn with the
+/// handle glyphs a mouse can aim at rather than a plain rule — and lights up
+/// while it is being dragged, because a resize with no feedback reads as a
+/// broken click.
+pub fn render_divider(f: &mut Frame, area: Rect, dragging: bool) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let (color, glyph) = if dragging {
+        (theme::MAUVE, "┃")
+    } else {
+        (theme::SURFACE1, "│")
+    };
+    let style = Style::default().fg(color).bg(Color::Reset);
+    let mid = area.height / 2;
+    let lines: Vec<Line> = (0..area.height)
+        .map(|i| {
+            // A three-cell handle in the middle says "grab here".
+            let g = if dragging || i.abs_diff(mid) > 1 {
+                glyph
+            } else {
+                "┋"
+            };
+            Line::styled(g, style)
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), area);
+}
+
 pub fn centered_rect(px: u16, py: u16, area: Rect) -> Rect {
     let v = Layout::vertical([
         Constraint::Percentage((100 - py) / 2),
